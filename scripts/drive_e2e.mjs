@@ -110,16 +110,40 @@ function returned(r) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const isRateLimit = (e) => /Rate limit|-32429|429/.test(String(e?.message || e?.details || e));
+
+const asText = (e) => String(e?.message || e?.details || e || "");
+const isRateLimit = (e) => /Rate limit|-32429|429/.test(asText(e));
+
+// StudioNet intermittently answers a poll with an HTML error page or
+// drops the connection outright. Both surface here as opaque viem
+// errors. They are infrastructure, not contract failures, and the
+// transaction they were polling for is ALREADY SUBMITTED — aborting
+// would strand it and re-sending would double-spend the action.
+const isTransientRpc = (e) => {
+  const t = asText(e);
+  return /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/.test(t)
+    || /Unexpected token '<'|not valid JSON/.test(t)     // HTML error page
+    || /\b(502|503|504)\b/.test(t);
+};
 
 async function retrying(fn, label) {
   for (let i = 0; ; i++) {
     try { return await fn(); }
     catch (e) {
-      if (!isRateLimit(e) || i >= 5) throw e;
-      const wait = 60_000 + i * 30_000;
-      console.log(`    ${label}: rate-limited, sleeping ${Math.round(wait / 1000)}s…`);
-      await sleep(wait);
+      if (isRateLimit(e) && i < 5) {
+        const wait = 60_000 + i * 30_000;
+        console.log(`\n    ${label}: rate-limited, sleeping ${Math.round(wait / 1000)}s…`);
+        await sleep(wait);
+        continue;
+      }
+      if (isTransientRpc(e) && i < 8) {
+        const wait = 10_000 + i * 5_000;
+        console.log(`\n    ${label}: transient RPC (${asText(e).slice(0, 60)}), `
+                    + `retrying in ${Math.round(wait / 1000)}s…`);
+        await sleep(wait);
+        continue;
+      }
+      throw e;
     }
   }
 }

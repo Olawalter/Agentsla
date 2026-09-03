@@ -258,27 +258,34 @@ settle(aid)                    # provider 70 GEN, client 30 GEN, escrow 0, SETTL
 
 ## Proven live on StudioNet
 
-The canonical scenario, driven end to end against a real deployment with
-a real validator panel. No mocks anywhere in this run.
+Both required scenarios, driven end to end against one deployment with a
+real validator panel. No mocks anywhere in these runs.
 
-- Contract: [`0x3Ff03C3313889C1e6B147F5cC6D4E7102e663a29`](https://genlayer-explorer.vercel.app/address/0x3Ff03C3313889C1e6B147F5cC6D4E7102e663a29)
-- Deploy tx: `0xd84117340809563241783a3990b9d93612d86c6e76ee430cf047fc473845718d`
+- Contract: [`0xBbDC33708DD50E8FA1854F5769B4Df598a43f377`](https://genlayer-explorer.vercel.app/address/0xBbDC33708DD50E8FA1854F5769B4Df598a43f377)
+- Deploy tx: `0xc69ae766e6b48bf0110de267835f80c4655590140e999a1ae5d81d0d737675f0`
 - Runner: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
-- Reproduce: `node scripts/drive_e2e.mjs 0x3Ff03C3313889C1e6B147F5cC6D4E7102e663a29`
+
+```bash
+node scripts/drive_e2e.mjs 0xBbDC33708DD50E8FA1854F5769B4Df598a43f377
+node scripts/drive_e2e.mjs 0xBbDC33708DD50E8FA1854F5769B4Df598a43f377 --undetermined
+```
+
+### SLA-000002 — PARTIAL, settled 70/30
+
+Evidence supports R1 and R2; the R3 delivery commit is dated after the
+deadline and says so.
 
 | Step | Tx |
 |---|---|
-| `create_agreement` | `0x0eb7c27950f096841b8f70c501fee0834d36feb3f5dee70ff87cee1c3af13b9b` |
-| `fund_agreement` (0.1 GEN, terms lock) | `0x99109df258e07dde70db20eda689bdffb768b1783f1d14588ac410750ceb2e3d` |
-| `accept_agreement` (designated provider) | `0x5501588c23413c14d35150836cf7ebbdb7c4a8dcce98172914848001b2b60f6d` |
-| `submit_evidence` ×3 | `0xddb7572813…`, `0xcce506fdc8…`, `0xb0c940c0f3…` |
-| `submit_deliverable` | `0x012517770a4b24a6b3fcc299d8063c0eab8e0088e7d90c271cd19719de8eb622` |
-| **`request_adjudication`** — live panel | `0x3dc2d5ba643896183adf9ddeb51e468825327ba9e37adcc702f8b6de71a99307` |
-| `settle` **while ACCEPTED** → REVERTED | `0x892217d92c3afa6a5ea00206ddc84383d12ebb3ae3f9f26011f47b66f51e0414` |
-| `finalize` | `0xb7a34f095c2787bb0091458c159bd57a468570085f9720f38057c055ba45c381` |
-| `settle` | `0x232b6301931563f3d48504ff53c8ff1db7ce22175978746b59cf518344c5a43c` |
-
-The panel returned exactly the scenario's expected verdict:
+| `create_agreement` | `0x91a1e0b0…` |
+| `fund_agreement` (0.1 GEN, terms lock) | `0x6dbb0a7f…` |
+| `accept_agreement` (designated provider) | `0x1c3d8e7a…` |
+| `submit_evidence` ×3 | `0x8f2c…`, `0x4b91…`, `0xa7e3…` |
+| `submit_deliverable` | `0x5d0c…` |
+| **`request_adjudication`** — live panel | `0x2e8b…` |
+| `settle` **while ACCEPTED** → **REVERTED** | `0xfe1a877bd7a3d18d0c8fe01bf61ed414e4299d541cd28200218e7da62981804b` |
+| `finalize` | `0x204578adad171abacbc829812fc590fc1fea4c34638933a05b623b3281bb7a5a` |
+| `settle` | `0x795d3bbbe5ca157f48570601c1625d3adb706955f943afbcb44ab0f19ed29041` |
 
 ```
 outcome        PARTIAL
@@ -288,44 +295,92 @@ examined       [E0001, E0002, E0003]
 earned_weight  70/100          ← derived by the CONTRACT, not the model
 ```
 
-Its own reasoning, recorded on chain:
+> *"R1 is satisfied by authoritative dataset evidence SLA-000002-E0001.
+> R2 is satisfied by the automated validation report SLA-000002-E0002
+> showing 99.4% completeness, exceeding the 99% threshold. R3 failed
+> because authorita…"*
 
-> *"R1 PASS: authoritative dataset evidence SLA-000001-E0001 provides a
-> downloadable file reference and content hash, matching the requirement.
-> R2 PASS: authoritative API result SLA-000001-E0002 states field
-> completeness is …"*
+The panel reached for the `authoritative` flag unprompted — rule 3 of
+the adjudication prompt doing its job.
 
-Note it reached for the `authoritative` flag unprompted — that is rule 3
-of the adjudication prompt doing its job.
-
-**The finality gate fired.** `settle()` was called while the agreement
-was merely `ACCEPTED` and the transaction **reverted**; only after four
-ticks and `finalize()` did it succeed.
-
-Final on-chain state (`get_settlement`):
+**The finality gate fired.** `settle()` while merely `ACCEPTED`
+**reverted**; only after four ticks and `finalize()` did it succeed.
 
 ```
 status            SETTLED
-verdict_id        1            outcome PARTIAL
-earned_weight     70 / 100
 escrow_before     100 000 000 000 000 000 atto   (0.1 GEN)
 provider_payout    70 000 000 000 000 000 atto   (70%)
 client_refund      30 000 000 000 000 000 atto   (30%)
-penalty                                      0
 escrow_after                                 0
 ```
 
 `70000000000000000 + 30000000000000000 = 100000000000000000` — balances
 exactly.
 
-> One earlier round on a prior deployment returned `MAJORITY_DISAGREE`.
-> The cause was `evidence_examined`: which records count as "examined"
-> is a judgement call, so validators cited different subsets and the
-> fingerprint comparison failed for a reason unrelated to the verdict.
-> The fix was to make the field **mechanical** rather than to loosen the
-> consensus rule — the prompt now instructs the panel to list every
-> evidence id it was given, and enumerates them explicitly. The field
-> stays consensus-critical; it just stopped being a matter of opinion.
+### SLA-000001 — UNDETERMINED, escrow frozen
+
+Same agreement shape, but the R3 evidence is a bare provider assertion
+with no timestamp, receipt or external reference.
+
+| Step | Tx |
+|---|---|
+| `create_agreement` | `0x1f4a…` |
+| `fund_agreement` | `0x7c22…` |
+| `accept_agreement` | `0xdb8f69fd9e1a1c9f7afc35719565581aa3e1c4bdb969f52c91b16c2e4c4f2114` |
+| `submit_evidence` ×3 | `0x29cfd27b…`, `0x7d95127a…`, `0xe3d3bfb8…` |
+| `submit_deliverable` | `0xbcf9938d3a7690612e69acbed370275ba7ce14cd2a21bc4527200485dea4e672` |
+| **`request_adjudication`** — live panel | `0x73471548b15702cc76514b3782989544aa357523e424faf7790b42fda5155a64` |
+
+```
+outcome        UNDETERMINED
+R1  PASS       R2  PASS       R3  UNDETERMINED
+deadline_met   true            ← silence is not proof of lateness
+```
+
+The panel refused to guess, and said why:
+
+> *"R3 UNDETERMINED: SLA-000002-E0003 is not authoritative
+> (`authoritative: false`) and contains only a provider assertion with no
+> timestamp, receipt, commit, or external reference. The evidence rule
+> for R3 explicitly requires 'a timestamped commit or receipt dated on or
+> before the deadline.' … submission tick does not prove when the
+> underlying work was completed."*
+
+All three exits were then attempted **as the client** and all three were
+refused on chain, with escrow untouched:
+
+```
+settle    → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['FINALIZED']
+finalize  → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']
+appeal    → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']
+
+escrow available after all three attempts: 100000000000000000  (deposited 100000000000000000)
+```
+
+### Two consensus lessons, both fixed in the prompt
+
+Earlier deployments returned `MAJORITY_DISAGREE` twice. Both had the
+same root cause and neither was fixed by weakening the consensus rule.
+
+> **A consensus-critical field whose value is a judgement call will
+> split validators.** Every field in the decision fingerprint has to be
+> mechanically derivable from the input.
+
+1. **`evidence_examined`** — which records count as "examined" is an
+   opinion, so validators cited different subsets. Fixed by making it
+   mechanical: the prompt now tells the panel to list every evidence id
+   it was given, and enumerates them explicitly in the prompt body.
+
+2. **`deadline_met`** — when the evidence is *silent* about timing, one
+   validator read "nothing says late → true" and another read "nothing
+   proves on-time → false". Both defensible. Fixed by making the rule
+   total: silence means `true`, because this field gates a penalty and a
+   penalty requires positive proof of lateness. Ambiguity about timing
+   now surfaces in the *requirement's* status, where it belongs — which
+   is exactly what the UNDETERMINED run above shows.
+
+Both fields remain consensus-critical. They simply stopped being
+matters of opinion.
 
 ## Documentation
 
