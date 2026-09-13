@@ -1,0 +1,14 @@
+{
+  "report_id": "QR-ACME-2026-07",
+  "dataset": "evidence/acme-2026-07-daily.csv",
+  "checked_at": "2026-09-13",
+  "summary": {
+    "rows_checked": 22,
+    "fields_checked": 88,
+    "empty_fields": 0,
+    "field_completeness_pct": 100.0,
+    "schema_conformant": true,
+    "duplicate_dates": 0
+  },
+  "result": "field completeness 100.0% meets the agreed 99% bar"
+}
