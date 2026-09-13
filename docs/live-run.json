@@ -1,0 +1,435 @@
+{
+  "network": "GenLayer StudioNet",
+  "chain_id": 61999,
+  "rpc": "https://studio.genlayer.com/api",
+  "client": "0xb2bdeBd8CdcF49148A1dc96473b342fC5caFd434",
+  "provider": "0xF50eE0581A5848Dd5F98b4B8cD81940f01A06A90",
+  "started_at": "2026-09-13T07:50:57Z",
+  "transactions": [
+    {
+      "step": "create_agreement",
+      "function": "create_agreement",
+      "caller": "client",
+      "tx": "0x981500064c874589d678a010bcd02ea1a2f3c4698bfa88090be466392de0cb0a",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "fund_agreement",
+      "function": "fund_agreement",
+      "caller": "client",
+      "tx": "0x6a210e91615e37a5e8704643c628ee41e692142444d9142e77e5561242af8229",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "accept_agreement",
+      "function": "accept_agreement",
+      "caller": "provider",
+      "tx": "0x1244124416ab4c9ba4e6b75fa921a20696b6a4f7d03a0ab1a55afa851bd314d2",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R1",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0xae8673ec09cc2b67c5385d385bd3d0c4fddeb2b0376544ff6ff4b3b124456871",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R2",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0x77abf5bb1f46e431c98f37129a0b42308167da559c4218c798570a356e514f18",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R3",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0x5dbf524888f92e42b5f9b67989932e8ad27312ac37b46f6193e62562eec2506f",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_deliverable",
+      "function": "submit_deliverable",
+      "caller": "provider",
+      "tx": "0x844583f4e543572e0e781e85db5280a38fcc7fd19282cb362a0b6b7ed009733f",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "request_adjudication",
+      "function": "request_adjudication",
+      "caller": "client",
+      "tx": "0x146c1e8b32298e247f712a993755835c4a254c747bdbea556b46b22686e106cd",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "settle while ACCEPTED",
+      "function": "settle",
+      "caller": "client",
+      "tx": "0x6ac7fd02534b1696734b9195830855609967f8e4d085a5a7c55db8073df3651b",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "refusal": "[EXPECTED] illegal transition from ACCEPTED; expected one of ['FINALIZED']"
+    },
+    {
+      "step": "tick 1",
+      "function": "tick",
+      "caller": "client",
+      "tx": "0xfb6b5d6db494e891461bf7425a553e4671b44196f05ca70d85733f04fd355983",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "tick 2",
+      "function": "tick",
+      "caller": "client",
+      "tx": "0xc14acab941df8db7909468bcf22ae7a4cba07367590c2156bb21b5f8c7bb7de7",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "tick 3",
+      "function": "tick",
+      "caller": "client",
+      "tx": "0xaaf5b945c942916e5fe68da2dad5a171b826ccfe321737adc292838f4b9b4311",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "tick 4",
+      "function": "tick",
+      "caller": "client",
+      "tx": "0x2ca26f70b74170d0a9e98e8a4a5b67092e574f0bb530db70a073073be89413e0",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "finalize",
+      "function": "finalize",
+      "caller": "client",
+      "tx": "0x3c42e91dd863d7fabbd64d0b0e45b825155927d67364e5e3ca08bbba5931c197",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "settle",
+      "function": "settle",
+      "caller": "client",
+      "tx": "0xadf3b21e34c107a4e6867bbde43d854b7350cd4daf7cbd8ea75636c79dda4c71",
+      "status": "FINALIZED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "create_agreement",
+      "function": "create_agreement",
+      "caller": "client",
+      "tx": "0x3158258e24b7633925a2773b19744df12eedeb5a438f5b6fe9edb70e9a241318",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "fund_agreement",
+      "function": "fund_agreement",
+      "caller": "client",
+      "tx": "0x3b94f47ce4074eb4e5784eb5022b4f2842b9ce5f0c97a47f4417ae2ce5c4d3f1",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "accept_agreement",
+      "function": "accept_agreement",
+      "caller": "provider",
+      "tx": "0x73dd18871176fbd315a767127f86c28a4860b73565c13804c306b24ddcdb0f14",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R1 (wrong hash)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0xdad6c2d81aa2b44c92ac849401416cecb481031f9e7e456661018be36f33fbd5",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R2 (404)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0xada0efc94de23217991fe1967f1e59dc396e9b098c44abcfcd56c5c2a0f4f13f",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_evidence R3 (unsupported)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0xb2b580bd404df13b7310e8cc5e769f02945d40531c87bb0ff8b7f5b84fff9f86",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "submit_deliverable",
+      "function": "submit_deliverable",
+      "caller": "provider",
+      "tx": "0xef87466d824a7a4086b19bde8fe9111ab1d4ca5049acde4674c905a1f7742505",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "request_adjudication",
+      "function": "request_adjudication",
+      "caller": "client",
+      "tx": "0xf4f666d1b0eae05ce71dee173facd734e490eecb85463067b44ac464f405df39",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false
+    },
+    {
+      "step": "settle while UNDETERMINED",
+      "function": "settle",
+      "caller": "client",
+      "tx": "0xd2d3b41ac87ff4879789623cad62e33e3f47bbf44f1df4dc9412c41797753242",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "refusal": "[EXPECTED] illegal transition from UNDETERMINED; expected one of ['FINALIZED']"
+    },
+    {
+      "step": "finalize while UNDETERMINED",
+      "function": "finalize",
+      "caller": "client",
+      "tx": "0x803a0e7e643953fe9a094e103cec9e53bd69e5335b0e112b44656e8130493628",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "refusal": "[EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']"
+    }
+  ],
+  "deployment": {
+    "address": "0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9",
+    "tx": "0xdcad5c60121fda7876629433b34ffc661446713494d7e4fcdf3044a8a32b903f",
+    "decision": "MAJORITY_AGREE"
+  },
+  "contract": "0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9",
+  "scenario_1": {
+    "agreement_id": "SLA-000001",
+    "verdict": {
+      "agreement_id": "SLA-000001",
+      "deadline_met": false,
+      "earned_weight": 70,
+      "evaluated_tick": 8,
+      "evidence_commitment_hash": "sha256:c1923139adc0a9675822b7b3e5559c54a19dca17621fa6d64c8d5e2d8c440bab",
+      "evidence_examined": [
+        "SLA-000001-E0001",
+        "SLA-000001-E0002",
+        "SLA-000001-E0003"
+      ],
+      "evidence_verification": [
+        {
+          "acquisition": "HTTPS_BYTES",
+          "byte_length": 674,
+          "detail": "retrieved artifact matches the committed identity",
+          "evidence_id": "SLA-000001-E0001",
+          "evidence_type": "DATASET",
+          "expected_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
+          "observed_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
+          "requirement_id": "R1",
+          "source_reference": "https://raw.githubusercontent.com/Olawalter/Agentsla/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a/evidence/acme-2026-07-daily.csv",
+          "status": "VERIFIED"
+        },
+        {
+          "acquisition": "HTTPS_JSON",
+          "byte_length": 367,
+          "detail": "retrieved artifact matches the committed identity",
+          "evidence_id": "SLA-000001-E0002",
+          "evidence_type": "API_RESULT",
+          "expected_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
+          "observed_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
+          "requirement_id": "R2",
+          "source_reference": "https://raw.githubusercontent.com/Olawalter/Agentsla/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a/evidence/quality-report.json#/summary",
+          "status": "VERIFIED"
+        },
+        {
+          "acquisition": "GITHUB_COMMIT",
+          "byte_length": 2449,
+          "detail": "retrieved artifact matches the committed identity",
+          "evidence_id": "SLA-000001-E0003",
+          "evidence_type": "GITHUB_COMMIT",
+          "expected_identity": "git:8517e9ab0848558b790cee8f8c9a0e533ec7cc3a",
+          "observed_identity": "git:8517e9ab0848558b790cee8f8c9a0e533ec7cc3a",
+          "requirement_id": "R3",
+          "source_reference": "https://github.com/Olawalter/Agentsla/commit/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a",
+          "status": "VERIFIED"
+        }
+      ],
+      "outcome": "PARTIAL",
+      "raw_json": "{\"agreement_id\":\"SLA-000001\",\"deadline_met\":false,\"evidence_examined\":[\"SLA-000001-E0001\",\"SLA-000001-E0002\",\"SLA-000001-E0003\"],\"outcome\":\"PARTIAL\",\"reasoning\":\"Requirement R1: The verified artifact SLA-000001-E0001 contains the ACME daily closing price and volume data for the month of July 2026 in CSV format as required. Status: PASS. Requirement R2: The verified artifact SLA-000001-E0002 reports a 'field_completeness_pct' of 100.0, which exceeds the minimum requirement of 99%. Status: PASS. Requirement R3: The verified artifact SLA-000001-E0003 shows the delivery commit date was Sun, 13 Sep 2026. This is after the stated deadline of 2026-09-01T00:00:00Z. Status: FAIL.\",\"requirements\":[{\"requirement_id\":\"R1\",\"status\":\"PASS\"},{\"requirement_id\":\"R2\",\"status\":\"PASS\"},{\"requirement_id\":\"R3\",\"status\":\"FAIL\"}]}",
+      "reasoning": "Requirement R1: The verified artifact SLA-000001-E0001 contains the ACME daily closing price and volume data for the month of July 2026 in CSV format as required. Status: PASS. Requirement R2: The verified artifact SLA-000001-E0002 reports a 'field_completeness_pct' of 100.0, which exceeds the minimum requirement of 99%. Status: PASS. Requirement R3: The verified artifact SLA-000001-E0003 shows the delivery commit date was Sun, 13 Sep 2026. This is after the stated deadline of 2026-09-01T00:00:00Z. Status: FAIL.",
+      "requirements": [
+        {
+          "requirement_id": "R1",
+          "status": "PASS"
+        },
+        {
+          "requirement_id": "R2",
+          "status": "PASS"
+        },
+        {
+          "requirement_id": "R3",
+          "status": "FAIL"
+        }
+      ],
+      "round_number": 1,
+      "terms_hash": "sha256:ecb42c3a7a3d745d9a0ff9b507bd85557a452f8e75595eb4d00a71d051c31f71",
+      "total_weight": 100,
+      "verdict_id": 1
+    },
+    "settlement": {
+      "agreement_id": "SLA-000001",
+      "client_refund": 30000000000000000,
+      "earned_weight": 70,
+      "escrow_after": 0,
+      "escrow_before": 100000000000000000,
+      "penalty": 0,
+      "provider_payout": 70000000000000000,
+      "settled_tick": 14,
+      "status": "SETTLED",
+      "total_weight": 100,
+      "verdict_id": 1
+    },
+    "balances": {
+      "provider_delta": 70000000000000000,
+      "contract_delta": -100000000000000000
+    }
+  },
+  "scenario_2": {
+    "agreement_id": "SLA-000002",
+    "verdict": {
+      "agreement_id": "SLA-000002",
+      "deadline_met": true,
+      "earned_weight": 0,
+      "evaluated_tick": 22,
+      "evidence_commitment_hash": "sha256:80adda6e797b5a8496481404cabce34d4f03c6ad9705bbcfe304bfac90e02ae6",
+      "evidence_examined": [
+        "SLA-000002-E0001",
+        "SLA-000002-E0002",
+        "SLA-000002-E0003"
+      ],
+      "evidence_verification": [
+        {
+          "acquisition": "HTTPS_BYTES",
+          "byte_length": 674,
+          "detail": "retrieved artifact does not match the committed identity",
+          "evidence_id": "SLA-000002-E0001",
+          "evidence_type": "DATASET",
+          "expected_identity": "sha256:dc7bc1a3cc35fffff3e36985131d7607caede0f2c5783524fecb48d14ab5e47f",
+          "observed_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
+          "requirement_id": "R1",
+          "source_reference": "https://raw.githubusercontent.com/Olawalter/Agentsla/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a/evidence/acme-2026-07-daily.csv",
+          "status": "HASH_MISMATCH"
+        },
+        {
+          "acquisition": "HTTPS_JSON",
+          "byte_length": 0,
+          "detail": "HTTP 404",
+          "evidence_id": "SLA-000002-E0002",
+          "evidence_type": "API_RESULT",
+          "expected_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
+          "observed_identity": "",
+          "requirement_id": "R2",
+          "source_reference": "https://raw.githubusercontent.com/Olawalter/Agentsla/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a/evidence/quality-report-v2.json",
+          "status": "SOURCE_UNAVAILABLE"
+        },
+        {
+          "acquisition": "UNSUPPORTED",
+          "byte_length": 0,
+          "detail": "no supported acquisition method for SIGNED_MESSAGE",
+          "evidence_id": "SLA-000002-E0003",
+          "evidence_type": "SIGNED_MESSAGE",
+          "expected_identity": "sig:0x5f2a",
+          "observed_identity": "",
+          "requirement_id": "R3",
+          "source_reference": "provider-signature",
+          "status": "UNSUPPORTED"
+        }
+      ],
+      "outcome": "UNDETERMINED",
+      "raw_json": "{}",
+      "reasoning": "No committed evidence could be acquired and verified (SLA-000002-E0001: HASH_MISMATCH, SLA-000002-E0002: SOURCE_UNAVAILABLE, SLA-000002-E0003: UNSUPPORTED). Every requirement is UNDETERMINED; no model was consulted.",
+      "requirements": [
+        {
+          "requirement_id": "R1",
+          "status": "UNDETERMINED"
+        },
+        {
+          "requirement_id": "R2",
+          "status": "UNDETERMINED"
+        },
+        {
+          "requirement_id": "R3",
+          "status": "UNDETERMINED"
+        }
+      ],
+      "round_number": 1,
+      "terms_hash": "sha256:1fee8b29e15f9e16b80f53df3cf4f879c08922a6932c961aac62837051731f9a",
+      "total_weight": 100,
+      "verdict_id": 1
+    }
+  },
+  "finished_at": "2026-09-13T07:57:23Z"
+}

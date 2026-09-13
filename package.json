@@ -1,6 +1,0 @@
-{
-  "name": "agentsla-core-scripts",
-  "private": true,
-  "type": "module",
-  "dependencies": { "genlayer-js": "^1.1.8" }
-}

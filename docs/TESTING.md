@@ -6,21 +6,24 @@
 pip install -r requirements.txt
 
 genvm-lint check contracts/agentsla_core.py       # 1 · lint
-pytest tests/direct/ -v                           # 2 · direct mode  (102 tests)
-gltest tests/integration/ -v -s                   # 3 · live consensus
+pytest tests/direct/ -v                           # 2 · direct mode  (137 tests)
+SKIP_INTEGRATION=0 pytest tests/integration -v -s # 3 · live StudioNet, no keys needed
 ```
 
 Direct mode runs the contract inside a real GenVM runner with no server,
-in about 20 seconds. Web and LLM calls are mocked. It exercises the
-**leader** path only — validator agreement is not simulated.
+in about a minute. Web and LLM calls are mocked — web mocks serve real
+bytes, and the contract verifies them itself. A contract call runs the
+leader closure; `direct_vm.run_validator()` replays the captured
+validator closure, so validator-side behaviour is tested directly.
 
 ## Current status
 
 | Gate | Result |
 |---|---|
 | `genvm-lint check` | passes — 26 methods (10 view, 16 write) |
-| `pytest tests/direct/` | **102 passed** |
-| Live deployment | StudioNet, real panel, full lifecycle settled |
+| `pytest tests/direct/` | **137 passed** |
+| `pytest tests/integration` | **2 passed** on StudioNet, real panel — verified PARTIAL settled 70/30; unverifiable evidence UNDETERMINED |
+| Mutation sweep | **12/12** evidence-trust defences broken in the contract, each caught |
 
 ## Layout
 
@@ -34,8 +37,12 @@ tests/direct/
   test_equivalence.py     layer 5 — the equivalence rule itself
   test_adversarial.py     attacks A–I
   test_settlement.py      the three required scenarios + arithmetic
+  test_evidence_verification.py
+                          contract-side acquisition and verification; steward tests A–J,
+                          leader-lies, validator independence, the verified E2E
 tests/integration/
-  test_end_to_end.py      live-network lifecycle with balance assertions
+  conftest.py             throwaway funded accounts, deploy, transaction recorder
+  test_end_to_end.py      live: verified PARTIAL 70/30, and nothing-verifiable UNDETERMINED
 ```
 
 ## Layer 1 — state
@@ -84,12 +91,14 @@ state **rolled back** rather than sticking in `ADJUDICATING`.
 
 ## Layer 5 — equivalence
 
-Direct mode cannot run validators, so these tests import the contract as
-plain Python behind a minimal `genlayer` stub and drive
-`_normalize_verdict`, `_decision_fingerprint` and `_parse_requirements`
-directly. Those three functions **are** the equivalence rule, and every
-validator runs exactly them, so what is proven here is what validators
-compare on chain.
+These tests import the contract as plain Python behind a minimal
+`genlayer` stub and drive `_normalize_verdict`, `_bind_to_verification`,
+`_decision_fingerprint` and `_parse_requirements` directly. Those
+functions **are** the equivalence rule, and every validator runs exactly
+them. Beyond the cases below: a different per-record verification breaks
+equivalence even when statuses match; the kind of failure alone
+(unavailable vs mismatch) does not; the outcome is re-derived after the
+evidence rule.
 
 1. **Legitimate equivalence accepted** — two materially different
    reasoning paragraphs produce the same fingerprint; requirement order
@@ -146,28 +155,71 @@ the weighted subset. Rounding uses a deliberately indivisible escrow
 exactly, with the remainder to the client. Penalties apply only when
 `deadline_met` is false.
 
+## Evidence verification
+
+`test_evidence_verification.py` serves real bytes through
+`direct_vm.mock_web` and commits their identities, computed in
+`conftest.py` by code written independently of the contract's. No mock
+returns "verified". It covers the steward's tests:
+
+| Test | Proves |
+|---|---|
+| A | a description reaches the model only as `submitted_claim_UNTRUSTED` beside the retrieved artifact; without a verified artifact even a model answering PASS is overruled to UNDETERMINED |
+| B, C | a wrong identity, a modified file, a different commit → `HASH_MISMATCH`, observed identity recorded, artifact never shown |
+| D | 404, 403, 500, 503 and no response → `SOURCE_UNAVAILABLE`, never PASS |
+| E | another agreement's record is never acquired or usable |
+| F | a leader claiming PASS with every record verified, against a mismatched source, is refused by the validator; rewriting only the leader's verification rows changes nothing for the validator |
+| G | the validator path fetches every source itself, disagrees when only its own bytes change, and refuses a verification it cannot reproduce |
+| H | a source that changes after a verdict is re-acquired on appeal and fails; the stale verdict cannot settle |
+| I | `SIGNED_MESSAGE` is never fetched and cannot decide a requirement |
+| J | with nothing verifiable no model is consulted, every requirement is UNDETERMINED, escrow stays whole |
+
+Plus invalid artifacts, JSON-pointer identity (a timestamp outside the
+pointer may change; a value inside may not), superseded records not
+acquired, the submitter identity tool agreeing with the contract, and the
+end-to-end 70/30 settlement on verified evidence with an independent
+validator replay.
+
+What direct mode cannot show is a real model's semantic judgement of a
+real artifact — the mock answers whatever it is told. That half is the
+integration suite's.
+
 ## Integration
 
-`tests/integration/test_end_to_end.py` runs the same lifecycle against a
-live network with real consensus, and asserts actual balance movement
-where the harness exposes it. It is skipped by default; set
-`SKIP_INTEGRATION=0` and point `.env` at a network to run it.
+`tests/integration/test_end_to_end.py` runs against StudioNet with a real
+panel. It needs no keys: `conftest.py` creates throwaway client and
+provider accounts, funds them with `sim_fundAccount`, deploys the
+contract (or uses `AGENTSLA_CONTRACT`), and records every transaction —
+decision, execution result, refusal message — to `docs/live-run.json`.
 
-`scripts/drive_e2e.mjs` is the equivalent as a standalone script,
-usable against any deployment:
+The evidence is real, served from commit `8517e9ab` on the
+`live-evidence` branch. Scenario 1 commits identities computed by
+`scripts/evidence_identity.py`, expects every record VERIFIED, R1 and R2
+PASS and R3 FAIL, a refused early `settle`, and after finality a
+settlement that moves the provider's balance by exactly the payout.
+Scenario 2 commits a wrong hash, a 404 and an unsupported signature, and
+expects UNDETERMINED with no model consulted and both exits refused.
 
-```bash
-AGENTSLA_CLIENT_KEY=0x… AGENTSLA_PROVIDER_KEY=0x… \
-  node scripts/drive_e2e.mjs <contract_address>
-
-# or the UNDETERMINED path
-  node scripts/drive_e2e.mjs <contract_address> --undetermined
-```
-
-It prints every transaction hash and asserts the finality gate refuses
-`settle()` while merely ACCEPTED.
+Assertions check committed STATE, never the receipt alone: a round whose
+validators disagree still shows a successful leader receipt. The first
+live run hit exactly that — see README, "What the first live attempt
+taught".
 
 ## Mutation checking
+
+Each evidence-trust defence was broken in the contract and the suite
+re-run: removing the evidence rule, a validator agreeing without
+comparing, trusting the submitted hash, dropping verification from the
+fingerprint, showing a mismatched artifact to the model, treating an HTTP
+error page as content, consulting the model with nothing verified, a
+validator that does not fetch, accepting a malformed identity, acquiring
+superseded records, ignoring the JSON pointer, truncating a long
+reference — **12 of 12 caught**. The first sweep left one survivor:
+dropping verification from the fingerprint went unnoticed, because every
+test that changed a verification also changed a requirement status.
+`test_G_validator_refuses_a_verification_it_cannot_reproduce` was added
+for it.
+
 
 Direct-mode LLM mocks are **first-registered-wins**, so a test that
 needs a second, different verdict must call `direct_vm.clear_mocks()`

@@ -1,12 +1,18 @@
 """Shared fixtures for the AgentSLA Core direct suite.
 
-Direct mode runs the contract inside a real GenVM runner but exercises
-the LEADER path only; validator agreement is covered separately in
-tests/direct/test_equivalence.py (which drives the normaliser and
-fingerprint directly) and in the integration suite against a live panel.
+Direct mode runs the contract inside a real GenVM runner. A contract call
+runs the LEADER closure; the validator closure is captured and replayed
+with `direct_vm.run_validator()` in tests/direct/test_evidence_verification.py.
+
+Evidence here is REAL BYTES served through `direct_vm.mock_web`. Every
+fixture commits the identity of those bytes, computed below by an
+implementation written independently of the contract's, and the contract
+must fetch them and verify them itself. No mock ever says "verified".
 """
+import hashlib
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -30,6 +36,93 @@ REQUIREMENTS = [
 ]
 
 REQUIREMENTS_JSON = json.dumps(REQUIREMENTS)
+
+
+# ─── identities, computed independently of the contract ───────────────────
+
+def sha256_identity(data: bytes) -> str:
+    """HTTPS_BYTES: sha256 over the exact bytes served."""
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def json_identity(body: bytes, pointer: str = "") -> str:
+    """HTTPS_JSON: sha256 over canonical JSON of the (pointed-to) value."""
+    value = json.loads(body.decode("utf-8-sig"))
+    for token in [t for t in pointer.split("/")[1:]] if pointer else []:
+        token = token.replace("~1", "/").replace("~0", "~")
+        value = value[int(token)] if isinstance(value, list) else value[token]
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# ─── the canonical artifacts ──────────────────────────────────────────────
+
+DATASET_URL = "https://data.example/market-2026-q3.csv"
+DATASET = (
+    "date,ticker,close,volume\n"
+    "2026-07-01,ACME,101.20,120400\n"
+    "2026-07-02,ACME,102.05,98200\n"
+    "2026-07-03,ACME,100.88,143900\n"
+).encode("utf-8")
+
+REPORT_URL = "https://validator.example/api/report/8821"
+REPORT = json.dumps({
+    "report_id": 8821,
+    "dataset": "market-2026-q3.csv",
+    "summary": {"field_completeness_pct": 99.4, "schema_conformant": True,
+                "duplicate_keys": 0},
+    "verdict": "meets the agreed 99% completeness bar",
+}, indent=2).encode("utf-8")
+
+COMMIT_SHA = "9fe1c2b0a4d3e6f7081928374655647382910abc"
+COMMIT_REF = f"https://github.com/example/delivery/commit/{COMMIT_SHA}"
+COMMIT_PATCH_URL = COMMIT_REF + ".patch"
+COMMIT_PATCH = (
+    f"From {COMMIT_SHA} Mon Sep 17 00:00:00 2001\n"
+    "From: Provider Agent <provider@example.com>\n"
+    "Date: Sun, 4 Oct 2026 10:12:00 +0000\n"
+    "Subject: [PATCH] Deliver market dataset\n"
+    "\n"
+    "---\n"
+    " market-2026-q3.csv | 4 ++++\n"
+    " 1 file changed, 4 insertions(+)\n"
+    "\n"
+    "diff --git a/market-2026-q3.csv b/market-2026-q3.csv\n"
+    "+date,ticker,close,volume\n"
+).encode("utf-8")
+
+# fetch url -> (http status, body). What an honest source serves.
+ARTIFACTS = {
+    DATASET_URL: (200, DATASET),
+    REPORT_URL: (200, REPORT),
+    COMMIT_PATCH_URL: (200, COMMIT_PATCH),
+}
+
+
+def mock_sources(direct_vm, overrides=None) -> None:
+    """Serve artifacts by exact URL. `overrides` wins over ARTIFACTS, so a
+    test can make a source lie, vanish or change. Anything not registered
+    raises in direct mode, which the contract treats as unavailable."""
+    served = dict(ARTIFACTS)
+    served.update(overrides or {})
+    for url, (status, body) in served.items():
+        direct_vm.mock_web("^" + re.escape(url) + "$", {"status": status, "body": body})
+
+
+def commit_canonical_evidence(deployed, agreement_id: str) -> list:
+    """R1 dataset, R2 quality report, R3 delivery commit — each committed
+    with the identity of the bytes its source actually serves."""
+    return [
+        deployed.submit_evidence(
+            agreement_id, "R1", "DATASET", DATASET_URL, sha256_identity(DATASET),
+            "Cleaned dataset, 2.1M rows."),
+        deployed.submit_evidence(
+            agreement_id, "R2", "API_RESULT", REPORT_URL, json_identity(REPORT),
+            "Automated quality report: 99.4% field completeness."),
+        deployed.submit_evidence(
+            agreement_id, "R3", "GITHUB_COMMIT", COMMIT_REF, "git:" + COMMIT_SHA,
+            "Delivery commit."),
+    ]
 
 
 def make_verdict(agreement_id: str, statuses: dict,
@@ -67,10 +160,11 @@ def make_verdict(agreement_id: str, statuses: dict,
     return json.dumps(payload)
 
 
-def mock_panel(direct_vm, verdict_json: str) -> None:
-    """Register the adjudication response. LLM mocks are
+def mock_panel(direct_vm, verdict_json: str, sources=None) -> None:
+    """Register the sources and the model's answer. Mocks are
     first-registered-wins in direct mode, so always clear first."""
     direct_vm.clear_mocks()
+    mock_sources(direct_vm, sources)
     direct_vm.mock_llm(r".*independent adjudicator on a GenLayer.*", verdict_json)
 
 
@@ -123,17 +217,6 @@ def active(direct_vm, deployed, direct_bob, funded):
 def submitted(direct_vm, deployed, direct_bob, active):
     """ACTIVE + evidence for all three requirements + delivery declared."""
     direct_vm.sender = direct_bob
-    deployed.submit_evidence(
-        active, "R1", "DATASET",
-        "https://data.example/market-2026-q3.parquet", "sha256:d1",
-        "Cleaned dataset, 2.1M rows.")
-    deployed.submit_evidence(
-        active, "R2", "API_RESULT",
-        "https://validator.example/api/report/8821", "sha256:d2",
-        "Automated quality report: 99.4% field completeness.")
-    deployed.submit_evidence(
-        active, "R3", "GITHUB_COMMIT",
-        "https://github.com/example/delivery/commit/9fe1c2b", "sha256:d3",
-        "Delivery commit.")
+    commit_canonical_evidence(deployed, active)
     deployed.submit_deliverable(active, "Dataset delivered.")
     return active

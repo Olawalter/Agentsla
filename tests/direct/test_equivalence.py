@@ -182,6 +182,69 @@ def test_different_examined_evidence_breaks_equivalence(core):
     assert core._decision_fingerprint(a) != core._decision_fingerprint(b)
 
 
+def _row(eid, rid, status):
+    return {"evidence_id": eid, "requirement_id": rid, "status": status}
+
+
+def test_different_evidence_verification_breaks_equivalence(core):
+    """A validator whose own retrieval did not verify a record cannot agree
+    with a leader whose did — even over identical model output."""
+    norm = core._normalize_verdict(
+        _verdict("PASS", {"R1": "PASS", "R2": "PASS", "R3": "PASS"},
+                 examined=["E1", "E2", "E3"]), "SLA-000001", RIDS)
+    leader = core._bind_to_verification(norm, [
+        _row("E1", "R1", "VERIFIED"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    validator = core._bind_to_verification(norm, [
+        _row("E1", "R1", "HASH_MISMATCH"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    assert validator["requirements"][0] == {"requirement_id": "R1", "status": "UNDETERMINED"}
+    assert core._decision_fingerprint(leader) != core._decision_fingerprint(validator)
+
+
+def test_verification_record_is_compared_even_when_statuses_match(core):
+    """The model leaves R1 UNDETERMINED on both nodes, so the requirement
+    statuses are identical — but only the leader's fetch verified E1. The
+    stored record would claim a verification no validator reproduced."""
+    norm = core._normalize_verdict(
+        _verdict("UNDETERMINED", {"R1": "UNDETERMINED", "R2": "PASS", "R3": "PASS"},
+                 examined=["E1", "E2", "E3"]), "SLA-000001", RIDS)
+    leader = core._bind_to_verification(norm, [
+        _row("E1", "R1", "VERIFIED"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    validator = core._bind_to_verification(norm, [
+        _row("E1", "R1", "HASH_MISMATCH"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    assert leader["requirements"] == validator["requirements"]
+    assert core._decision_fingerprint(leader) != core._decision_fingerprint(validator)
+
+
+def test_failure_kind_alone_does_not_split_consensus(core):
+    """UNAVAILABLE on one node and MISMATCH on another have the same
+    consequence — the record supports nothing — so they agree."""
+    norm = core._normalize_verdict(
+        _verdict("PARTIAL", {"R1": "PASS", "R2": "PASS", "R3": "FAIL"},
+                 examined=["E1", "E2", "E3"]), "SLA-000001", RIDS)
+    a = core._bind_to_verification(norm, [
+        _row("E1", "R1", "SOURCE_UNAVAILABLE"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    b = core._bind_to_verification(norm, [
+        _row("E1", "R1", "HASH_MISMATCH"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    assert core._decision_fingerprint(a) == core._decision_fingerprint(b)
+
+
+def test_outcome_is_rederived_after_the_evidence_rule(core):
+    norm = core._normalize_verdict(
+        _verdict("PASS", {"R1": "PASS", "R2": "PASS", "R3": "PASS"},
+                 examined=["E1", "E2", "E3"]), "SLA-000001", RIDS)
+    bound = core._bind_to_verification(norm, [
+        _row("E1", "R1", "UNSUPPORTED"), _row("E2", "R2", "VERIFIED"),
+        _row("E3", "R3", "VERIFIED")])
+    assert bound["outcome"] == "UNDETERMINED"
+    assert bound["capped_requirements"] == ["R1"]
+
+
 # ── 3 · malformed results are rejected before comparison ────────────────────
 
 @pytest.mark.parametrize("bad,expect", [

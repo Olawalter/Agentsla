@@ -3,40 +3,90 @@
 ## The nondeterministic operation
 
 One method performs nondeterministic work: `request_adjudication`. It
-calls `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)` with a custom
-validator function.
+builds the committed evidence specs from storage (`_adjudication_specs`)
+and calls `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)` in
+`_adjudicate_nondet`.
 
 ```python
 def leader_fn():
-    raw = gl.nondet.exec_prompt(p, response_format="json")
-    norm = normalize(raw, aid, rids)          # module-level, pure
-    return {"normalized": norm, "raw": raw}
+    rows = []
+    for spec in committed:                                     # committed evidence, by value
+        http_status, body = 0, None
+        if spec["method"] != ACQ_UNSUPPORTED:
+            try:
+                resp = gl.nondet.web.get(spec["fetch_url"])    # 1 · ACQUIRE
+                http_status, body = resp.status, resp.body
+            except Exception:
+                http_status, body = 0, None
+        rows.append(verify(spec, http_status, body))          # 2 · VERIFY  (_verify_artifact)
+    if any(r["status"] == V_VERIFIED for r in rows):
+        raw  = gl.nondet.exec_prompt(render(context, committed, rows),   # 3 · JUDGE verified artifacts
+                                     response_format="json")
+        norm = normalize(raw, aid, rids)                       #     (_normalize_verdict)
+    else:
+        raw, norm = {}, unverified(aid, rids, rows)            #     nothing verified: no model
+    return {"normalized": bind(norm, rows),                    # 4 · EVIDENCE RULE (_bind_to_verification)
+            "raw": raw, "verification": [public(r) for r in rows]}
 
 def validator_fn(leaders_res):
     if not isinstance(leaders_res, gl.vm.Return):
         return _handle_leader_error(leaders_res, leader_fn)
-    raw = gl.nondet.exec_prompt(p, response_format="json")   # OWN work
-    mine = normalize(raw, aid, rids)
+    rows = []
+    for spec in committed:
+        ...  resp = gl.nondet.web.get(spec["fetch_url"])       # 1 · ITS OWN FETCH
+        rows.append(verify(spec, http_status, body))          # 2 · ITS OWN VERIFICATION
+    ...  raw = gl.nondet.exec_prompt(render(context, committed, rows), …)  # 3 · ITS OWN JUDGEMENT
+    mine = bind(normalize(raw, aid, rids), rows)               # 4 · SAME RULE, ITS OWN ROWS
     theirs = leaders_res.calldata["normalized"]
     return fingerprint(theirs) == fingerprint(mine)
 ```
 
-Both the parser and the normaliser are **module-level functions**, not
-methods. This is required, not stylistic: GenVM forbids storage reads
-inside an equivalence-principle block, so the nondet closure must not
-capture `self`. Everything the block needs is passed in by value.
+The fetch and model calls are written out in **both** closures rather
+than shared: genvm-lint requires each `gl.nondet.*` call to sit directly
+inside the closure passed to `run_nondet_unsafe`. Everything done with
+the bytes — `_verify_artifact`, `_render_prompt`, `_normalize_verdict`,
+`_bind_to_verification`, `_decision_fingerprint` — is a module-level pure
+function, so leader and validators apply byte-identical rules to their
+own retrievals. The closures capture only plain data, never `self`:
+GenVM forbids storage reads inside an equivalence block.
 
-## What validators actually do
+## Validator independence
 
-A validator does **not** inspect the leader's answer and check that it
-is well-formed JSON. That would be leader-output-only validation: it
-proves the leader can format a response, not that the response is
-correct, and it leaves one node deciding alone.
+| | Leader | Validator |
+|---|---|---|
+| evidence acquisition | `leader_fn` → `gl.nondet.web.get` | `validator_fn` → `gl.nondet.web.get` |
+| verification | `_verify_artifact` on the leader's bytes | `_verify_artifact` on the validator's bytes |
+| judgement | `exec_prompt` over artifacts the leader verified | `exec_prompt` over artifacts the validator verified |
+| evidence rule | `_bind_to_verification` with the leader's rows | `_bind_to_verification` with the validator's rows |
+| comparison | — | `_decision_fingerprint(theirs) == _decision_fingerprint(mine)` |
 
-Instead every validator **re-runs the same adjudication** over the same
-committed prompt, normalises its own result with the same code, and
-compares decision fingerprints. Agreement means two independent nodes
-reading the same evidence reached the same factual conclusions.
+The only thing a validator takes from the leader is
+`leaders_res.calldata["normalized"]`, and only as the value its own
+result is compared against. It never reads the leader's `verification`
+rows, a verification flag, an artifact, a hash, the reasoning or the
+outcome as an input. The leader cannot tell a validator that evidence is
+verified: a validator's `evidence_verification` is built from its own
+fetch, and if it differs the fingerprints differ.
+
+Proven in direct mode by replaying the contract's captured validator
+closure with `direct_vm.run_validator()`
+(`tests/direct/test_evidence_verification.py`):
+
+- `test_G_validator_fetches_every_source_itself` — the validator path
+  fetches every committed reference;
+- `test_G_validator_disagrees_when_its_own_retrieval_differs` — same
+  leader result, same model answer, only the validator's bytes change:
+  it refuses;
+- `test_G_validator_refuses_a_verification_it_cannot_reproduce` — no
+  requirement status differs, only whether one record verified: it
+  refuses;
+- `test_F_leader_claiming_pass_and_verified_is_refused` — a leader
+  returning `PASS` with every record marked verified, against a source
+  serving mismatched bytes, is refused; the honest `UNDETERMINED` result
+  is agreed with;
+- `test_F_leader_verification_rows_are_never_read_by_the_validator` —
+  rewriting only the leader's verification rows changes nothing for the
+  validator.
 
 ## The decision fingerprint
 
@@ -44,130 +94,114 @@ reading the same evidence reached the same factual conclusions.
 
 ```python
 {
-  "agreement_id":      ...,   # which agreement
-  "outcome":           ...,   # PASS | PARTIAL | FAIL | UNDETERMINED
-  "requirements":      [...], # per-requirement PASS/FAIL/UNDETERMINED, sorted
-  "deadline_met":      ...,   # bool
-  "evidence_examined": [...], # evidence ids, deduped and sorted
+  "agreement_id":          ...,  # which agreement
+  "outcome":               ...,  # derived from the statuses below
+  "requirements":          [...],# per-requirement status AFTER the evidence rule, sorted
+  "deadline_met":          ...,  # bool
+  "evidence_examined":     [...],# evidence ids, deduped and sorted
+  "evidence_verification": [...],# [{evidence_id, verified: bool}], sorted
 }
 ```
 
-Canonicalised with sorted keys and no incidental whitespace, so two
-nodes building the same logical object emit identical bytes.
+Canonicalised with sorted keys and no incidental whitespace.
 
 ### Why each field is in there
 
 | Field | Why it must match |
 |---|---|
-| `agreement_id` | A verdict for a different agreement is not a disagreement, it is a mis-binding. |
-| `outcome` | The headline finding. Disagreement here is a genuine split. |
-| `requirements` | **This is what pays.** Each PASS carries its committed weight into the settlement arithmetic. Two nodes agreeing on `PARTIAL` while disagreeing about *which* requirement failed would produce different payouts. |
-| `deadline_met` | Gates the penalty calculation. |
-| `evidence_examined` | Two nodes reaching the same verdict from different evidence have not verified the same thing. |
+| `agreement_id` | A verdict for a different agreement is a mis-binding, not a disagreement. |
+| `outcome` | The headline finding. |
+| `requirements` | **This is what pays.** Each PASS carries its committed weight into settlement. The statuses compared are the ones after `_bind_to_verification`, so a model's PASS on unverified evidence never reaches the comparison. |
+| `deadline_met` | Gates the penalty. |
+| `evidence_examined` | Two nodes reaching the same verdict over different record sets have not checked the same thing. |
+| `evidence_verification` | Whether each committed record was retrieved **and** matched its identity on this node. Without it, a leader could store "VERIFIED" for a record no validator could verify whenever the requirement's status happened to coincide. |
 
-### Why `reasoning` is NOT in there
+### What is deliberately not in there
 
-Two honest validators reading identical evidence will reach the same
-verdict and will **not** write the same paragraph. Requiring identical
-prose would make consensus fail for a reason that has nothing to do with
-correctness — the panel would rotate forever over word choice. The
-reasoning is stored verbatim on the verdict for auditability; it simply
-does not participate in agreement.
+- **`reasoning`** — two honest validators reach the same verdict and do
+  not write the same paragraph (`test_different_wording_same_decision_is_equivalent`).
+- **The kind of failure** — only `verified: bool` is compared, not
+  `HASH_MISMATCH` vs `SOURCE_UNAVAILABLE` vs `INVALID_ARTIFACT`. They
+  have the same consequence, and a validator whose fetch timed out where
+  the leader's hit a mismatch must not split the round over a distinction
+  nothing reads (`test_failure_kind_alone_does_not_split_consensus`).
+- **Observed identities and raw bytes** — web content can differ between
+  requests; what is compared is whether it matched the commitment, not the
+  page. A matched artifact is identical on every node by construction.
 
-`test_different_wording_same_decision_is_equivalent` pins this: two
-materially different paragraphs, same fingerprint.
+## Equivalence strategy
+
+`run_nondet_unsafe` with a custom validator, not `strict_eq` over the
+whole result and not a prompt-comparative check:
+
+- the **objective** half — acquisition status, identity comparison, the
+  evidence rule, the outcome derivation — is computed by the same code on
+  every node and compared exactly;
+- the **semantic** half — does a verified artifact satisfy a requirement —
+  is produced independently by each node's own model call and compared on
+  its decision-bearing projection, never on prose.
+
+A validator that only checked the leader's JSON for shape would be
+schema validation; a validator that trusted the leader's verification
+would be leader-only verification. This does neither.
 
 ## Ordering is normalised, not assumed
 
-- Requirement results are **sorted by `requirement_id`**.
-- Evidence ids are **deduplicated and sorted**.
-
-So a validator that lists requirements in a different order, or cites
-the same evidence twice, still matches. Only substance breaks
-agreement — proven by `test_requirement_order_does_not_matter` and
-`test_evidence_order_does_not_matter`.
+Requirement results are sorted by `requirement_id`; evidence ids are
+deduplicated and sorted; verification entries are sorted by
+`evidence_id`. Only substance breaks agreement.
 
 ## Malformed results are rejected before comparison
 
-`_normalize_verdict` refuses, with `[LLM_ERROR]`:
+`_normalize_verdict` refuses, with `[LLM_ERROR]`: non-object output,
+wrong `agreement_id`, invalid outcome, unknown / duplicate / **missing**
+requirement, invalid status, non-boolean `deadline_met`, non-list
+`evidence_examined`, empty `reasoning`, and internally incoherent
+combinations. It returns a fixed key set, so invented fields —
+`provider_payout`, `earned_weight`, `evidence_verified` — never survive.
 
-- non-object output
-- wrong `agreement_id`
-- outcome outside `{PASS, PARTIAL, FAIL, UNDETERMINED}`
-- a requirement id not in the committed set
-- a duplicate requirement id
-- a **missing** requirement (the verdict must cover all of them)
-- a status outside `{PASS, FAIL, UNDETERMINED}`
-- non-boolean `deadline_met`
-- non-list `evidence_examined`
-- empty `reasoning`
-- **internally incoherent** combinations: `PASS` carrying a `FAIL`,
-  `FAIL` carrying a `PASS`, `PARTIAL` without both, a decided outcome
-  carrying an `UNDETERMINED` requirement, or `UNDETERMINED` without one
+## Post-consensus checks
 
-Valid JSON is not sufficient. The verdict must describe *this* agreement's
-*committed* requirement set, coherently.
+Consensus agreeing on a value does not make it legitimate. After the
+round, inside a block that restores the prior state on any refusal,
+`request_adjudication`:
 
-## Invented fields cannot survive
+1. refuses a verdict citing evidence that is not this agreement's
+   (`test_I_verdict_citing_foreign_evidence_rejected`);
+2. `_check_verification` refuses verification rows that do not describe
+   exactly the committed records (same id, requirement, type, reference,
+   identity and method), rows whose status disagrees with the agreed
+   `verified` flags, any decided requirement without a verified record,
+   and an outcome that does not follow from the statuses.
 
-`_normalize_verdict` returns a **fixed key set**:
-
-```
-agreement_id · outcome · requirements · deadline_met ·
-evidence_examined · reasoning
-```
-
-A model that emits `provider_payout: 999999999999`, `earned_weight: 100`
-or `override_settlement: true` has those fields dropped at the
-normalisation boundary. They never reach storage, never reach the
-fingerprint, and there is no code path from model output to an amount.
-
-`earned_weight` on the stored verdict is computed **by the contract**,
-after consensus, by summing the committed weights of the requirements
-the panel marked PASS. Proven by `test_H_llm_payout_field_is_ignored`
-and `test_payout_fields_are_stripped`.
-
-## Post-consensus binding check
-
-Consensus agreeing on a value does not make the value legitimate. After
-the round returns, `request_adjudication` verifies that **every cited
-evidence id belongs to this agreement**. A panel that unanimously cites
-a record from another agreement is still refused, the state rolls back,
-and escrow is untouched — `test_I_verdict_citing_foreign_evidence_rejected`.
+Only then is `earned_weight` computed, by the contract, from the
+committed weights and the final statuses.
 
 ## Failure agreement
-
-Validators must also agree about failures, or a broken round can never
-close. `_handle_leader_error` implements:
 
 | Leader error class | Validator behaviour |
 |---|---|
 | `[EXPECTED]` / `[EXTERNAL]` — deterministic | agree only if the validator's own message matches exactly |
-| `[TRANSIENT]` — network/5xx | agree if the validator also hit a transient failure |
+| `[TRANSIENT]` | agree if the validator also hit a transient failure |
 | `[LLM_ERROR]` — model misbehaved | **always disagree**, forcing rotation |
 | leader failed, validator succeeded | disagree |
 
-Agreeing on broken model output would lock bad state, so the LLM class
-never agrees.
+Source failures are not errors: an unavailable source is a verification
+row, and the round still produces a verdict.
 
 ## UNDETERMINED
 
-`UNDETERMINED` is a first-class consensus result, not a failure to reach
-one. Validators agree on it exactly as they agree on `PASS`. What
-changes is what the contract does next: the agreement parks in the
-`UNDETERMINED` state, escrow stays whole, and neither `settle()` nor
-`finalize()` is legal. See SETTLEMENT.md.
+A first-class consensus result. Validators agree on it as they agree on
+PASS. When no committed record verifies, every node reaches it without a
+model call; the agreement parks in `UNDETERMINED`, escrow stays whole,
+and neither `settle()` nor `finalize()` is legal.
 
 ## Finality
 
 Consensus accepting a verdict does not make it spendable. The verdict
 lands the agreement in `ACCEPTED` with an appeal window open; only
-`finalize()` — legal after the window elapses — produces `FINALIZED`,
-and only `FINALIZED` can `settle()`.
-
-If a party appeals, the agreement leaves `ACCEPTED` for `APPEALED`, and
-the path back runs through a fresh adjudication round. A stale accepted
-verdict can therefore never trigger settlement:
-`test_FINALITY_appeal_prevents_stale_settlement` appeals an accepted
-100/100 PASS, re-adjudicates to 70/100 PARTIAL, and asserts the
-settlement used the **second** verdict.
+`finalize()` after the window produces `FINALIZED`, and only `FINALIZED`
+can `settle()`. An appeal moves the agreement to `APPEALED`, and the way
+back runs through a fresh round that acquires and verifies the evidence
+again — `test_FINALITY_appeal_prevents_stale_settlement`,
+`test_H_artifact_that_changes_after_a_verdict_is_reacquired_and_fails`.

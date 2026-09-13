@@ -6,10 +6,14 @@ from .conftest import ESCROW, REQUIREMENTS, REQUIREMENTS_JSON
 
 def test_protocol_info(direct_vm, deployed):
     info = deployed.get_protocol_info()
-    assert info["version"] == "AgentSLA-Core-1.0.0"
+    assert info["version"] == "AgentSLA-Core-1.1.0"
     assert info["weight_total"] == 100
     assert info["agreement_count"] == 0
     assert "GITHUB_COMMIT" in info["authoritative_types"]
+    # every type has exactly one acquisition method, stated not implied
+    assert set(info["acquisition_by_type"]) == set(info["evidence_types"])
+    assert info["acquisition_by_type"]["SIGNED_MESSAGE"] == "UNSUPPORTED"
+    assert info["acquisition_by_type"]["API_RESULT"] == "HTTPS_JSON"
 
 
 def test_create_agreement(direct_vm, deployed, direct_alice, direct_bob, drafted):

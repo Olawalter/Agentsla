@@ -15,7 +15,36 @@ Every defence below is backed by a named test. The tests assert that
 | F | Settlement before finality | `settle` accepts only `FINALIZED`. `finalize` refuses until the appeal window elapses. | `test_F_accepted_cannot_settle`, `test_F_finalize_blocked_inside_appeal_window` |
 | G | Settling an UNDETERMINED verdict | The state machine has no path from `UNDETERMINED` to `FINALIZED` or `SETTLED`, and `settle` re-checks the verdict outcome. | `test_G_undetermined_cannot_settle` |
 | H | Model returns a payout field | `_normalize_verdict` returns a fixed key set; invented fields are dropped. `earned_weight` is computed by the contract from committed weights. | `test_H_llm_payout_field_is_ignored`, `test_payout_fields_are_stripped` |
-| I | Cross-agreement evidence | `_resolve_evidence` enforces the binding on every access; after consensus, every cited evidence id is checked against this agreement's set. | `test_I_evidence_from_another_agreement_rejected`, `test_I_verdict_citing_foreign_evidence_rejected` |
+| I | Cross-agreement evidence | `_resolve_evidence` enforces the binding on every access; a round acquires only the agreement's own records; after consensus, every cited evidence id is checked against this agreement's set. | `test_I_evidence_from_another_agreement_rejected`, `test_I_verdict_citing_foreign_evidence_rejected`, `test_E_evidence_of_another_agreement_is_never_acquired_or_usable` |
+
+## Evidence trust
+
+The steward's rejection: adjudication never retrieved the committed
+evidence, so validators judged descriptions, reference strings and
+unverified hashes. The defences, each on the leader and on every
+validator (see [EVIDENCE.md](EVIDENCE.md), [CONSENSUS.md](CONSENSUS.md)):
+
+| Attack | Defence | Test |
+|---|---|---|
+| **Fake description** — "requirement completed" over an artifact that shows nothing of the kind | The description reaches the model only as `submitted_claim_UNTRUSTED`; the model reads the retrieved artifact. A requirement with no verified record is UNDETERMINED in code whatever the model says. | `test_A_description_reaches_the_model_only_as_an_untrusted_claim`, `test_A_description_without_a_verified_artifact_cannot_pass` |
+| **Fake hash** — an identity that does not belong to what the reference serves | Every node fetches the reference and compares the identity of the bytes it received with the commitment, in `_verify_artifact`. Mismatch → `HASH_MISMATCH`, no artifact shown, requirement UNDETERMINED. | `test_B_wrong_hash_is_a_mismatch` |
+| **Source substitution** — the source changes after commitment, or between rounds | Same comparison, performed afresh in every round; nothing verified earlier is reused. | `test_C_modified_artifact_is_a_mismatch`, `test_C_modified_commit_identity_is_a_mismatch`, `test_H_artifact_that_changes_after_a_verdict_is_reacquired_and_fails` |
+| **Leader-only verification** — a leader reports PASS and "verified" | Validators fetch, verify and judge for themselves and compare fingerprints that include per-record `verified`. They never read the leader's verification rows. | `test_F_leader_claiming_pass_and_verified_is_refused`, `test_F_leader_verification_rows_are_never_read_by_the_validator`, `test_G_validator_disagrees_when_its_own_retrieval_differs`, `test_G_validator_refuses_a_verification_it_cannot_reproduce` |
+| **Unavailable evidence becoming PASS** | 404 / 403 / 5xx / no response → `SOURCE_UNAVAILABLE`; empty, oversized or unparseable → `INVALID_ARTIFACT`; neither can decide a requirement. | `test_D_source_unavailable_never_passes`, `test_D_no_response_at_all_is_unavailable`, `test_invalid_artifacts_are_rejected` |
+| **Unsupported evidence standing in for proof** | `BLOCKCHAIN_TX`, `SIGNED_MESSAGE`, `OTHER` are `UNSUPPORTED`: never fetched, never shown with content, never decide a requirement. | `test_I_unsupported_type_is_marked_and_capped` |
+| **Nothing verifiable, settled anyway** | No verified record → no model call, every requirement UNDETERMINED, `settle` and `finalize` refused, escrow whole. | `test_J_nothing_verifiable_is_undetermined_without_consulting_a_model` |
+| **Frontend or backend says "verified"** | There is no method, argument or storage field through which verification can be supplied. Verification exists only as the output of a node's own fetch inside the round. | by construction — `_verify_artifact` is the only producer of a status |
+| **Silent reference change** — truncation or edit | References over 512 characters are refused, not clipped; no method mutates a stored reference or identity. | `test_long_reference_is_refused_not_truncated`, `test_C_committed_evidence_cannot_be_edited` |
+| **Premature settlement** | Unchanged: only `FINALIZED` settles; UNDETERMINED cannot finalize. | `test_F_accepted_cannot_settle`, `test_G_undetermined_cannot_settle` |
+
+Each of these defences was broken on purpose in the contract to confirm
+the suite catches it: removing the evidence rule, trusting the submitted
+hash, a validator agreeing without comparing, a validator that does not
+fetch, dropping verification from the fingerprint, showing a mismatched
+artifact to the model, treating an HTTP error page as content, consulting
+the model with nothing verified, accepting a malformed identity,
+acquiring superseded records, ignoring the JSON pointer, truncating a long
+reference — 12 of 12 caught.
 
 ## Authorization
 
@@ -128,9 +157,18 @@ Stated plainly rather than left implicit:
   can agree on a false verdict. That is GenLayer's trust model, not
   something this contract can fix. The appeal path exists so a bad round
   can be contested and re-run.
-- **Evidence quality.** The contract commits to a hash; it cannot verify
-  that a URL still serves those bytes. `AUTHORITATIVE_TYPES` and the
-  prompt's rule 3 push the panel toward independently checkable
-  artefacts, but a determined liar can submit a plausible fake.
+- **Authorship and truth of a verified artifact.** Verification proves the
+  source served exactly the committed bytes. It does not prove who wrote
+  them or that they are true: a provider can host a fabricated report and
+  commit its hash, and it will verify. The panel then judges what that
+  artifact shows — a self-hosted report is still a party's own document.
+  A commit identity proves GitHub serves that commit; its author and date
+  are unauthenticated git metadata.
+- **Unstable sources.** A source that serves different bytes on every
+  request cannot verify, by design. Such evidence must be committed as a
+  stable artifact (for example a commit-pinned raw file), or as a JSON
+  payload selected by pointer.
+- **Unsupported types.** Chain transactions and signatures are recorded
+  but cannot decide a requirement (see EVIDENCE.md for why).
 - **Off-chain collusion.** Two parties agreeing privately to a different
   outcome than the contract computes is outside its scope.

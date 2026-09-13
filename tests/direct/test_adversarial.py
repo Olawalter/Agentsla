@@ -9,6 +9,10 @@ import pytest
 
 from .conftest import ESCROW, REQUIREMENTS_JSON, make_verdict, mock_panel
 
+H_ORIG = "sha256:" + "1" * 64
+H_NEW = "sha256:" + "2" * 64
+H_OTHER = "sha256:" + "3" * 64
+
 
 def _ids(deployed, aid):
     return [e["evidence_id"] for e in deployed.get_evidence(aid)]
@@ -78,7 +82,7 @@ def test_B_reweighting_requirements_is_impossible_post_funding(
 def test_C_committed_evidence_cannot_be_edited(direct_vm, deployed, direct_bob, active):
     direct_vm.sender = direct_bob
     eid = deployed.submit_evidence(
-        active, "R1", "DATASET", "https://orig", "sha256:original", "v1")
+        active, "R1", "DATASET", "https://data.example/orig.csv", H_ORIG, "v1")
 
     # No mutating method exists…
     schema_methods = [m for m in dir(deployed) if not m.startswith("_")]
@@ -87,9 +91,10 @@ def test_C_committed_evidence_cannot_be_edited(direct_vm, deployed, direct_bob, 
         assert forbidden not in schema_methods
 
     # …and superseding leaves the original commitment intact.
-    deployed.supersede_evidence(active, eid, "https://new", "sha256:replacement", "v2")
+    deployed.supersede_evidence(active, eid, "https://data.example/new.csv", H_NEW, "v2")
     ev = {e["evidence_id"]: e for e in deployed.get_evidence(active)}
-    assert ev[eid]["content_hash"] == "sha256:original"
+    assert ev[eid]["content_hash"] == H_ORIG
+    assert ev[eid]["source_reference"] == "https://data.example/orig.csv"
     assert ev[eid]["status"] == "SUPERSEDED"
 
 
@@ -235,11 +240,11 @@ def test_I_evidence_from_another_agreement_rejected(
     direct_vm.sender = direct_bob
     deployed.accept_agreement(other)
     foreign = deployed.submit_evidence(
-        other, "R1", "DATASET", "https://other", "sha256:other", "belongs to other")
+        other, "R1", "DATASET", "https://data.example/other.csv", H_OTHER, "belongs to other")
 
     # superseding a foreign record through THIS agreement must fail
     with direct_vm.expect_revert("belongs to"):
-        deployed.supersede_evidence(active, foreign, "u", "sha256:x", "d")
+        deployed.supersede_evidence(active, foreign, "https://data.example/x.csv", H_NEW, "d")
 
     # challenging a foreign record through THIS agreement must fail
     direct_vm.sender = direct_alice
@@ -261,7 +266,7 @@ def test_I_verdict_citing_foreign_evidence_rejected(
     direct_vm.sender = direct_bob
     deployed.accept_agreement(other)
     foreign = deployed.submit_evidence(
-        other, "R1", "DATASET", "https://other", "sha256:other", "foreign")
+        other, "R1", "DATASET", "https://data.example/other.csv", H_OTHER, "foreign")
 
     mock_panel(direct_vm, make_verdict(
         submitted, {"R1": "PASS", "R2": "PASS", "R3": "FAIL"},

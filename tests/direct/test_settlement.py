@@ -4,7 +4,12 @@ import json
 
 import pytest
 
-from .conftest import ESCROW, REQUIREMENTS_JSON, make_verdict, mock_panel
+from .conftest import (ESCROW, REQUIREMENTS_JSON, commit_canonical_evidence,
+                       json_identity, make_verdict, mock_panel)
+
+# A re-run of the quality report, served from a second, stable endpoint.
+REPORT_RERUN_URL = "https://validator.example/api/report/8822"
+REPORT_RERUN = b'{"report_id": 8822, "summary": {"field_completeness_pct": 99.6}}'
 
 
 def _ids(deployed, aid):
@@ -107,13 +112,14 @@ def test_UNDETERMINED_protects_escrow_then_retries(
     # retry path: more evidence, then another round
     direct_vm.sender = direct_bob
     deployed.submit_evidence(
-        aid, "R2", "API_RESULT", "https://validator.example/api/report/8822",
-        "sha256:d4", "Re-run of the quality report with a stable endpoint.")
+        aid, "R2", "API_RESULT", REPORT_RERUN_URL, json_identity(REPORT_RERUN),
+        "Re-run of the quality report with a stable endpoint.")
 
     mock_panel(direct_vm, make_verdict(
         aid, {"R1": "PASS", "R2": "PASS", "R3": "PASS"},
         evidence_examined=_ids(deployed, aid),
-        reasoning="The re-run report resolves R2."))
+        reasoning="The re-run report resolves R2."),
+        sources={REPORT_RERUN_URL: (200, REPORT_RERUN)})
     direct_vm.sender = direct_alice
     v2 = deployed.request_adjudication(aid)
 
@@ -273,7 +279,7 @@ def test_rounding_remainder_goes_to_client(
     direct_vm.value = 0
     direct_vm.sender = direct_bob
     deployed.accept_agreement(aid)
-    deployed.submit_evidence(aid, "R1", "DATASET", "u", "sha256:a", "d")
+    commit_canonical_evidence(deployed, aid)
     deployed.submit_deliverable(aid, "done")
 
     mock_panel(direct_vm, make_verdict(
@@ -306,7 +312,7 @@ def test_penalty_applies_only_when_deadline_missed(
     direct_vm.value = 0
     direct_vm.sender = direct_bob
     deployed.accept_agreement(aid)
-    deployed.submit_evidence(aid, "R1", "DATASET", "u", "sha256:a", "d")
+    commit_canonical_evidence(deployed, aid)
     deployed.submit_deliverable(aid, "late")
 
     mock_panel(direct_vm, make_verdict(

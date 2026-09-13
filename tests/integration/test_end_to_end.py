@@ -1,218 +1,181 @@
-"""Live-network integration test.
+"""Live integration: contract-side evidence acquisition on a real panel.
 
-Run against a real GenLayer network with a real validator panel:
+    SKIP_INTEGRATION=0 pytest tests/integration -v -s
 
-    SKIP_INTEGRATION=0 gltest tests/integration/ -v -s
+The evidence is real and hosted, pinned to one commit of this repository
+(branch `live-evidence`): a daily price dataset, a quality report about it,
+and the commit that delivered them. The agreement's stated deadline
+(2026-09-01) is before that commit's date, so a correct panel fails R3.
 
-Direct mode cannot exercise validator agreement — it runs the leader
-only. This test is where the equivalence rule meets an actual panel, and
-where GEN actually moves.
+The provider commits identities computed by scripts/evidence_identity.py
+from what the sources serve. The contract is then on its own: during
+adjudication the leader and every validator fetch the three references,
+verify the bytes, and judge the verified artifacts. The descriptions say
+nothing useful on purpose — the verdict has to come from the artifacts.
 
-`scripts/drive_e2e.mjs` is the standalone equivalent, usable against any
-deployment without the test harness.
+Scenario 1 — PARTIAL: R1 PASS, R2 PASS, R3 FAIL, finalised, settled 70/30.
+Scenario 2 — nothing verifiable: HASH_MISMATCH, 404, UNSUPPORTED →
+UNDETERMINED with no model consulted, escrow untouched.
 """
+import hashlib
+import importlib.util
 import json
-import os
 import pathlib
-
-import pytest
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-CONTRACT = ROOT / "contracts" / "agentsla_core.py"
 
-PRICE = 100 * (10 ** 18)
+EVIDENCE_COMMIT = "8517e9ab0848558b790cee8f8c9a0e533ec7cc3a"
+RAW = f"https://raw.githubusercontent.com/Olawalter/Agentsla/{EVIDENCE_COMMIT}/evidence"
+DATASET_URL = f"{RAW}/acme-2026-07-daily.csv"
+REPORT_URL = f"{RAW}/quality-report.json#/summary"
+MISSING_URL = f"{RAW}/quality-report-v2.json"
+COMMIT_REF = f"https://github.com/Olawalter/Agentsla/commit/{EVIDENCE_COMMIT}"
+
+PRICE = 10 ** 17        # 0.1 GEN: large enough that 70/30 is exact
 
 REQUIREMENTS = [
-    {"requirement_id": "R1",
-     "description": "Deliver the requested market dataset as a downloadable file.",
-     "weight": 40, "required": True,
-     "evidence_rule": "A dataset reference with a content hash."},
-    {"requirement_id": "R2",
-     "description": "The delivered dataset meets the agreed quality bar: at "
-                    "least 99% field completeness.",
-     "weight": 30, "required": True,
-     "evidence_rule": "An automated validation report or API result."},
-    {"requirement_id": "R3",
-     "description": "Delivery occurred on or before the agreed service deadline.",
-     "weight": 30, "required": False,
-     "evidence_rule": "A timestamped commit or receipt on or before the deadline."},
+    {"requirement_id": "R1", "weight": 40, "required": True,
+     "description": "Deliver ACME daily closing price and volume data for July "
+                    "2026 as a downloadable CSV file.",
+     "evidence_rule": "The CSV file itself."},
+    {"requirement_id": "R2", "weight": 30, "required": True,
+     "description": "An automated quality check of the delivered dataset reports "
+                    "field completeness of at least 99%.",
+     "evidence_rule": "The quality report's summary."},
+    {"requirement_id": "R3", "weight": 30, "required": False,
+     "description": "Delivery occurred on or before the service deadline of "
+                    "2026-09-01T00:00:00Z.",
+     "evidence_rule": "The date of the commit that delivered the files."},
 ]
 
-skip_unless_live = pytest.mark.skipif(
-    os.environ.get("SKIP_INTEGRATION", "1") != "0",
-    reason="set SKIP_INTEGRATION=0 and point .env at a network to run",
-)
+
+def _identity_tool():
+    spec = importlib.util.spec_from_file_location(
+        "evidence_identity", ROOT / "scripts" / "evidence_identity.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-@pytest.fixture
-def deployed(gltest_deploy):
-    return gltest_deploy(str(CONTRACT))
+def _served(tool, etype, reference):
+    req = urllib.request.Request(tool.fetch_url(etype, reference),
+                                 headers={"User-Agent": "agentsla-integration"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read()
 
 
-@skip_unless_live
-def test_live_partial_performance_pays_70_30(deployed, gltest_alice, gltest_bob):
-    """The canonical scenario against a real panel.
+def _agreement(live, description):
+    before = live.read("get_protocol_info")["agreement_count"]
+    live.write(live.client_acct, "create_agreement",
+               live.provider_acct.address, description, json.dumps(REQUIREMENTS),
+               PRICE, 10, 30, 200,
+               "Only artifacts retrieved and verified during adjudication count.",
+               "Weighted per-requirement payout; rounding remainder to the client.",
+               0, 3, step="create_agreement")
+    aid = f"SLA-{before + 1:06d}"
+    assert live.read("get_agreement", aid)["status"] == "DRAFT"
+    live.write(live.client_acct, "fund_agreement", aid, value=PRICE)
+    live.write(live.provider_acct, "accept_agreement", aid)
+    return aid
 
-    Evidence is authored so R1 and R2 are supported and R3 is plainly
-    not: the delivery commit is dated after the deadline and says so.
-    A correct panel returns PARTIAL with R3 FAIL; the contract then pays
-    70/30 from the committed weights.
-    """
-    client, provider = gltest_alice, gltest_bob
 
-    aid = deployed.connect(client).create_agreement(
-        provider=str(provider),
-        service_description="Deliver a cleaned Q3 2026 market dataset with a "
-                            "quality report.",
-        requirements_json=json.dumps(REQUIREMENTS),
-        payment_amount_atto=PRICE,
-        acceptance_deadline_ticks=10,
-        service_deadline_ticks=30,
-        resolution_deadline_ticks=200,
-        evidence_rules="Prefer authoritative evidence.",
-        settlement_rules="Weighted per-requirement payout.",
-        penalty_bps=0,
-        appeal_window_ticks=3,
-    )
+def test_live_verified_evidence_partial_settles_70_30(live):
+    tool = _identity_tool()
+    dataset_id = tool.identity("DATASET", DATASET_URL, _served(tool, "DATASET", DATASET_URL))
+    report_id = tool.identity("API_RESULT", REPORT_URL, _served(tool, "API_RESULT", REPORT_URL))
+    commit_id = tool.identity("GITHUB_COMMIT", COMMIT_REF, _served(tool, "GITHUB_COMMIT", COMMIT_REF))
 
-    deployed.connect(client).fund_agreement(aid, value=PRICE)
-    a = deployed.get_agreement(aid)
-    assert a["status"] == "FUNDED"
-    assert a["escrow_deposited"] == PRICE
-    assert a["terms_locked"] is True
-    terms_hash = a["terms_hash"]
+    print("\nSCENARIO 1 — verified evidence, partial performance")
+    aid = _agreement(live, "Deliver the ACME July 2026 daily dataset with a quality "
+                           "report, by 2026-09-01T00:00:00Z.")
+    live.write(live.provider_acct, "submit_evidence", aid, "R1", "DATASET", DATASET_URL,
+               dataset_id, "Dataset delivered.", step="submit_evidence R1")
+    live.write(live.provider_acct, "submit_evidence", aid, "R2", "API_RESULT", REPORT_URL,
+               report_id, "Quality report.", step="submit_evidence R2")
+    live.write(live.provider_acct, "submit_evidence", aid, "R3", "GITHUB_COMMIT", COMMIT_REF,
+               commit_id, "Delivered on time.", step="submit_evidence R3")
+    live.write(live.provider_acct, "submit_deliverable", aid, "Delivered.")
 
-    deployed.connect(provider).accept_agreement(aid)
+    adj = live.write(live.client_acct, "request_adjudication", aid)
+    assert not adj["reverted"], adj.get("refusal")
+    state = live.read("get_agreement", aid)
+    assert state["latest_verdict_id"] == 1, "the round must have committed a verdict"
+    v = live.read("get_verdict", aid, 1)
+    live.record["scenario_1"] = {"agreement_id": aid, "verdict": v}
 
-    deployed.connect(provider).submit_evidence(
-        aid, "R1", "DATASET",
-        "https://data.example/market-q3-2026.parquet",
-        "sha256:8f14e45fceea167a5a36dedd4bea2543",
-        "Cleaned Q3 2026 dataset, 2,140,882 rows.")
-    deployed.connect(provider).submit_evidence(
-        aid, "R2", "API_RESULT",
-        "https://validator.example/api/reports/8821",
-        "sha256:c4ca4238a0b923820dcc509a6f75849b",
-        "Validation report: field completeness 99.4%, schema conformant. "
-        "Meets the agreed 99% bar.")
-    deployed.connect(provider).submit_evidence(
-        aid, "R3", "GITHUB_COMMIT",
-        "https://github.com/example/delivery/commit/9fe1c2b",
-        "sha256:e3b0c44298fc1c149afbf4c8996fb924",
-        "Delivery commit dated 2026-10-04, which is AFTER the agreed "
-        "service deadline of 2026-09-30. Delivery was four days late.")
+    rows = {r["requirement_id"]: r for r in v["evidence_verification"]}
+    for rid in ("R1", "R2", "R3"):
+        assert rows[rid]["status"] == "VERIFIED", rows[rid]
+        assert rows[rid]["observed_identity"] == rows[rid]["expected_identity"]
+    assert {r["requirement_id"]: r["status"] for r in v["requirements"]} == {
+        "R1": "PASS", "R2": "PASS", "R3": "FAIL"}, v["reasoning"]
+    assert v["outcome"] == "PARTIAL"
+    assert v["earned_weight"] == 70
+    assert state["status"] == "ACCEPTED"
 
-    deployed.connect(provider).submit_deliverable(aid, "Dataset delivered.")
+    early = live.write(live.client_acct, "settle", aid, step="settle while ACCEPTED")
+    assert early["reverted"] and "illegal transition from ACCEPTED" in early["refusal"]
+    assert live.read("get_agreement", aid)["escrow_available"] == PRICE
 
-    # ── the live panel ──
-    vid = deployed.connect(client).request_adjudication(aid)
-    v = deployed.get_verdict(aid, vid)
+    for i in range(4):
+        live.write(live.client_acct, "tick", step=f"tick {i + 1}")
+    live.write(live.client_acct, "finalize", aid)
+    assert live.read("get_agreement", aid)["status"] == "FINALIZED"
 
-    assert v["terms_hash"] == terms_hash, "verdict must judge the committed terms"
-    assert v["outcome"] in {"PASS", "PARTIAL", "FAIL", "UNDETERMINED"}
-    # every committed requirement covered, exactly once
-    assert {r["requirement_id"] for r in v["requirements"]} == {"R1", "R2", "R3"}
-    # earned_weight is derived by the CONTRACT, never by the model
-    expected_earned = sum(
-        req["weight"] for req in REQUIREMENTS
-        if next(r["status"] for r in v["requirements"]
-                if r["requirement_id"] == req["requirement_id"]) == "PASS"
-    )
-    assert v["earned_weight"] == expected_earned
-
-    if v["outcome"] == "UNDETERMINED":
-        pytest.skip(f"panel returned UNDETERMINED: {v['reasoning'][:160]}")
-
-    # ── finality: ACCEPTED must not settle ──
-    assert deployed.get_agreement(aid)["status"] == "ACCEPTED"
-    assert deployed.get_state(aid)["can_settle"] is False
-    with pytest.raises(Exception):
-        deployed.connect(client).settle(aid)
-    assert deployed.get_agreement(aid)["escrow_available"] == PRICE
-
-    for _ in range(4):
-        deployed.connect(client).tick()
-    deployed.connect(client).finalize(aid)
-    assert deployed.get_state(aid)["can_settle"] is True
-
-    # ── balances before ──
-    try:
-        client_before = int(deployed.get_balance(str(client)))
-        provider_before = int(deployed.get_balance(str(provider)))
-        contract_before = int(deployed.get_balance(deployed.address))
-    except Exception:
-        client_before = provider_before = contract_before = None
-
-    deployed.connect(client).settle(aid)
-
-    a = deployed.get_agreement(aid)
-    s = deployed.get_settlement(aid)
-
-    assert a["status"] == "SETTLED"
-    assert a["escrow_available"] == 0
-    assert s["escrow_before"] == PRICE
+    provider_before = live.balance(live.provider_acct.address)
+    contract_before = live.balance(live.address)
+    live.write(live.client_acct, "settle", aid, wait="FINALIZED")
+    s = live.read("get_settlement", aid)
+    live.record["scenario_1"]["settlement"] = s
+    assert s["provider_payout"] == PRICE * 70 // 100
+    assert s["client_refund"] == PRICE - PRICE * 70 // 100
     assert s["escrow_after"] == 0
-    assert s["earned_weight"] == expected_earned
-    assert s["provider_payout"] == PRICE * expected_earned // 100
-    assert s["provider_payout"] + s["client_refund"] == PRICE
+    assert live.read("get_agreement", aid)["status"] == "SETTLED"
 
-    # ── actual value movement, where the harness exposes it ──
-    if client_before is not None:
-        payout = int(s["provider_payout"])
-        refund = int(s["client_refund"])
-        assert int(deployed.get_balance(str(provider))) == provider_before + payout, \
-            "provider wallet did not receive the payout"
-        assert int(deployed.get_balance(str(client))) == client_before + refund, \
-            "client wallet did not receive the refund"
-        assert int(deployed.get_balance(deployed.address)) == \
-            contract_before - payout - refund, \
-            "contract did not release the full escrow"
-
-    # ── double settlement is impossible ──
-    with pytest.raises(Exception):
-        deployed.connect(client).settle(aid)
-    assert deployed.get_agreement(aid)["escrow_available"] == 0
+    def paid():
+        return live.balance(live.provider_acct.address) == provider_before + s["provider_payout"]
+    live._await(paid, "provider payout", tries=60)
+    live.record["scenario_1"]["balances"] = {
+        "provider_delta": live.balance(live.provider_acct.address) - provider_before,
+        "contract_delta": live.balance(live.address) - contract_before,
+    }
+    assert live.record["scenario_1"]["balances"]["contract_delta"] == -PRICE
 
 
-@skip_unless_live
-def test_live_undetermined_protects_escrow(deployed, gltest_alice, gltest_bob):
-    """Evidence deliberately too thin to decide. The panel should say so,
-    and escrow must stay whole."""
-    client, provider = gltest_alice, gltest_bob
+def test_live_unverifiable_evidence_is_undetermined(live):
+    tool = _identity_tool()
+    served_dataset = _served(tool, "DATASET", DATASET_URL)
+    wrong_id = "sha256:" + hashlib.sha256(served_dataset + b"\n# altered").hexdigest()
+    report_id = tool.identity("API_RESULT", REPORT_URL, _served(tool, "API_RESULT", REPORT_URL))
 
-    aid = deployed.connect(client).create_agreement(
-        provider=str(provider),
-        service_description="Deliver a dataset with a quality report.",
-        requirements_json=json.dumps(REQUIREMENTS),
-        payment_amount_atto=PRICE,
-        acceptance_deadline_ticks=10,
-        service_deadline_ticks=30,
-        resolution_deadline_ticks=200,
-    )
-    deployed.connect(client).fund_agreement(aid, value=PRICE)
-    deployed.connect(provider).accept_agreement(aid)
+    print("\nSCENARIO 2 — nothing verifiable")
+    aid = _agreement(live, "Same deliverable, evidenced badly.")
+    live.write(live.provider_acct, "submit_evidence", aid, "R1", "DATASET", DATASET_URL,
+               wrong_id, "Requirement completed.", step="submit_evidence R1 (wrong hash)")
+    live.write(live.provider_acct, "submit_evidence", aid, "R2", "API_RESULT", MISSING_URL,
+               report_id, "Requirement completed.", step="submit_evidence R2 (404)")
+    live.write(live.provider_acct, "submit_evidence", aid, "R3", "SIGNED_MESSAGE",
+               "provider-signature", "sig:0x5f2a", "Requirement completed.",
+               step="submit_evidence R3 (unsupported)")
+    live.write(live.provider_acct, "submit_deliverable", aid, "Delivered.")
 
-    # One vague, self-reported record for one requirement. Nothing that
-    # would let an honest reader decide R2 or R3.
-    deployed.connect(provider).submit_evidence(
-        aid, "R1", "OTHER", "internal note",
-        "sha256:0000000000000000000000000000000000000000",
-        "Provider states the work is done. No dataset, report, timestamp "
-        "or external reference is attached.")
-    deployed.connect(provider).submit_deliverable(aid, "done")
+    adj = live.write(live.client_acct, "request_adjudication", aid)
+    assert not adj["reverted"], adj.get("refusal")
+    v = live.read("get_verdict", aid, 1)
+    live.record["scenario_2"] = {"agreement_id": aid, "verdict": v}
 
-    vid = deployed.connect(client).request_adjudication(aid)
-    v = deployed.get_verdict(aid, vid)
+    rows = {r["requirement_id"]: r for r in v["evidence_verification"]}
+    assert rows["R1"]["status"] == "HASH_MISMATCH"
+    assert rows["R1"]["observed_identity"] == "sha256:" + hashlib.sha256(served_dataset).hexdigest()
+    assert rows["R2"]["status"] == "SOURCE_UNAVAILABLE" and rows["R2"]["detail"] == "HTTP 404"
+    assert rows["R3"]["status"] == "UNSUPPORTED"
+    assert v["outcome"] == "UNDETERMINED"
+    assert {r["status"] for r in v["requirements"]} == {"UNDETERMINED"}
+    assert v["raw_json"] == "{}", "no model is consulted when nothing verified"
+    assert live.read("get_agreement", aid)["status"] == "UNDETERMINED"
 
-    if v["outcome"] != "UNDETERMINED":
-        pytest.skip(f"panel decided {v['outcome']} on thin evidence; "
-                    f"the UNDETERMINED path is covered in direct tests")
-
-    a = deployed.get_agreement(aid)
-    assert a["status"] == "UNDETERMINED"
-    assert a["escrow_available"] == PRICE      # nothing moved
-
-    for method in ("settle", "finalize"):
-        with pytest.raises(Exception):
-            getattr(deployed.connect(client), method)(aid)
-    assert deployed.get_agreement(aid)["escrow_available"] == PRICE
+    for fn in ("settle", "finalize"):
+        attempt = live.write(live.client_acct, fn, aid, step=f"{fn} while UNDETERMINED")
+        assert attempt["reverted"] and "illegal transition from UNDETERMINED" in attempt["refusal"]
+    assert live.read("get_agreement", aid)["escrow_available"] == PRICE

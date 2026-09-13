@@ -42,12 +42,13 @@
 
 ### `submit_evidence(agreement_id, requirement_id, evidence_type, source_reference, content_hash, description="") -> str`
 
-**Purpose** Commit an evidence record against one requirement.
+**Purpose** Commit an evidence record against one requirement: a pointer (`source_reference`) and the identity the artifact must have (`content_hash`). Nothing is fetched here — every node fetches and verifies it during adjudication. `description` is the submitter's claim and is shown to the panel as untrusted.
 **Caller** Either party.
 **State** ACTIVE, SUBMITTED, ACCEPTED, APPEALED or UNDETERMINED.
-**Side effects** Appends the record; writes the owner and index entries.
+**Commitment shape** by type (see EVIDENCE.md): byte types `https://…` + `sha256:<64 hex>` of the exact bytes; `JSON`/`API_RESULT` `https://…[#/pointer]` + `sha256:<64 hex>` of the canonical JSON payload; `GITHUB_COMMIT` `https://github.com/<o>/<r>/commit/<40 hex>` + `git:<same sha>`; `BLOCKCHAIN_TX`/`SIGNED_MESSAGE`/`OTHER` any reference and identity — recorded as UNSUPPORTED.
+**Side effects** Appends the record (identity stored lowercase); writes the owner and index entries.
 **Returns** `"SLA-000001-E0001"` style id.
-**Fails when** not a party; wrong state; unknown `requirement_id`; unsupported `evidence_type`; empty `content_hash`; evidence limit (128) reached.
+**Fails when** not a party; wrong state; unknown `requirement_id`; `evidence_type` outside the vocabulary; empty identity or over 128 characters; reference over 512 characters (refused, never truncated); for a fetchable type, a reference or identity its acquisition method could never verify; evidence limit (128) reached.
 
 ### `supersede_evidence(agreement_id, evidence_id, source_reference, content_hash, description="") -> str`
 
@@ -55,7 +56,7 @@
 **Caller** The **original submitter** only.
 **Side effects** Marks the old record SUPERSEDED (hash untouched); appends a new record with `version + 1`.
 **Returns** The new evidence id.
-**Fails when** unknown evidence; evidence belongs to another agreement; caller is not the original submitter; already superseded; empty hash.
+**Fails when** unknown evidence; evidence belongs to another agreement; caller is not the original submitter; already superseded; the new reference or identity breaks the commitment rules for the record's type.
 
 ### `challenge_evidence(agreement_id, evidence_id, reason)`
 
@@ -76,9 +77,9 @@
 **Purpose** Run a GenLayer adjudication round. The core nondeterministic operation.
 **Caller** Either party.
 **State** SUBMITTED, APPEALED or UNDETERMINED → ADJUDICATING → ACCEPTED or UNDETERMINED.
-**Side effects** Runs `gl.vm.run_nondet_unsafe`; on success writes a new Verdict (with contract-derived `earned_weight`), increments the round, and either opens an appeal window (ACCEPTED) or parks the agreement (UNDETERMINED).
+**Side effects** Runs `gl.vm.run_nondet_unsafe`, in which the leader and every validator fetch each non-superseded committed reference, verify the retrieved bytes against the committed identity, judge only verified artifacts, and apply the evidence rule (a requirement without a verified record is UNDETERMINED). If nothing verifies, no model is called. On success writes a new Verdict — contract-derived `earned_weight`, per-record verification rows, evidence commitment hash — increments the round, and either opens an appeal window (ACCEPTED) or parks the agreement (UNDETERMINED).
 **Returns** The new verdict id.
-**Fails when** not a party; wrong state; terms drifted; round limit (5) reached; no evidence; the panel's verdict fails normalisation; the verdict cites evidence from another agreement. **On any failure the prior state is restored.**
+**Fails when** not a party; wrong state; terms drifted; round limit (5) reached; no evidence; the panel's verdict fails normalisation; the verdict cites evidence from another agreement; the verification rows do not describe exactly the committed records or a decided requirement lacks a verified record. **On any failure the prior state is restored.** A source that cannot be read is not a failure — it is a verification status.
 
 ### `appeal(agreement_id, reason)`
 
@@ -134,12 +135,12 @@
 
 | Method | Returns |
 |---|---|
-| `get_protocol_info()` | version, agreement count, current tick, `weight_total`, default appeal window, max rounds, the evidence-type and authoritative-type vocabularies |
+| `get_protocol_info()` | version, agreement count, current tick, `weight_total`, default appeal window, max rounds, the evidence-type and authoritative-type vocabularies, `acquisition_by_type`, `verification_statuses` |
 | `get_agreement(id)` | full agreement record including terms hash, lock flag, escrow triple, all deadlines, status, round, latest verdict id |
 | `get_requirements(id)` | the committed requirement array |
-| `get_evidence(id)` | all evidence records with a derived `authoritative` flag |
+| `get_evidence(id)` | all evidence records with derived `authoritative` and `acquisition` fields |
 | `list_verdicts(id)` | verdict ids, oldest first |
-| `get_verdict(id, verdict_id)` | outcome, per-requirement statuses, `deadline_met`, examined evidence, reasoning, contract-derived `earned_weight`, terms hash, raw panel JSON |
+| `get_verdict(id, verdict_id)` | outcome, per-requirement statuses, `deadline_met`, examined evidence, reasoning, contract-derived `earned_weight`, terms hash, raw panel JSON (`{}` when no model was consulted), `evidence_verification` rows, `evidence_commitment_hash` |
 | `get_escrow(id)` | payment amount, deposited, released, available, `held` flag |
 | `get_settlement(id)` | payout, refund, penalty, escrow before/after, earned/total weight, status, tick |
 | `get_state(id)` | compact lifecycle probe including `can_settle` — what a keeper or UI polls |

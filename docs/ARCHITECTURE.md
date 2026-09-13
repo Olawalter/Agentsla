@@ -8,13 +8,16 @@
                  ┌────────────────────────┐      ┌──────────────────────┐
  Agreement ──────┤                        │      │                      │
  Requirements ───┤   GenLayer panel       │      │  weight arithmetic   │
- Evidence ───────┤   reads evidence,      ├─────►│  payout / refund     │──► transfer
- Deadlines ──────┤   returns FACTS        │      │  escrow zeroing      │
-                 │                        │      │                      │
+ Evidence refs ──┤   each node FETCHES    ├─────►│  payout / refund     │──► transfer
+ Deadlines ──────┤   and VERIFIES the     │      │  escrow zeroing      │
+                 │   artifacts, judges    │      │                      │
+                 │   verified ones only,  │      │                      │
+                 │   returns FACTS        │      │                      │
                  └────────────────────────┘      └──────────────────────┘
                    per-requirement PASS/FAIL        provider_payout
                    deadline_met                     client_refund
                    evidence_examined                penalty
+                   per-record verified
 ```
 
 The panel never sees a monetary figure and never returns one. The
@@ -33,8 +36,11 @@ Terms Commitment
        ↓          sha256 over the frozen term set; locked at funding
 Evidence Commitments
        ↓          submit_evidence, supersede_evidence, challenge_evidence
+                  (a reference + an identity; nothing fetched yet)
 GenLayer Adjudication
        ↓          request_adjudication → gl.vm.run_nondet_unsafe
+Evidence Acquisition + Verification   (leader AND every validator)
+       ↓          gl.nondet.web.get → _verify_artifact → evidence rule (see EVIDENCE.md)
 Validator Equivalence
        ↓          decision fingerprint comparison (see CONSENSUS.md)
 Finality / Appeal
@@ -104,6 +110,8 @@ and parsed at the view boundary. This is deliberate and load-bearing:
 - `Agreement.requirements_json` — the frozen requirement set
 - `Verdict.requirement_results_json` — per-requirement statuses
 - `Verdict.evidence_examined_json` — cited evidence ids
+- `Verdict.evidence_verification_json` — per-record verification rows
+  (status and identities; never artifact content)
 
 Evidence is the one collection stored as a real `DynArray`, because
 records must be mutable in place (status changes). It lives in exactly

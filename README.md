@@ -2,8 +2,9 @@
 
 > A reusable GenLayer Intelligent Contract primitive for evidence-based
 > service agreements: lock an agreement and real GEN on chain, commit
-> verifiable evidence, let validator consensus decide whether the
-> requirements were met, wait for finality, and settle deterministically.
+> evidence as a reference and an identity, have every validator retrieve
+> and verify the actual artifacts and decide whether the requirements were
+> met, wait for finality, and settle deterministically.
 
 The contract is the artifact. There is no frontend, and the project
 loses nothing without one.
@@ -41,6 +42,10 @@ actually do it.
         UNDETERMINED                            penalty if deadline missed
       deadline_met                              client_refund = escrow − payout
       which evidence was examined               escrow zeroing, the transfer
+
+      Deterministic code, on every node, also decides WHETHER EVIDENCE COUNTS:
+      the retrieved bytes match the committed identity, or the record
+      supports nothing.
 ```
 
 The adjudicating model is **never allowed to name an amount**. It
@@ -58,9 +63,12 @@ more than one independent party to agree on what that evidence shows.
 
 GenLayer gives both. `request_adjudication` runs
 `gl.vm.run_nondet_unsafe`, where the leader **and every validator**
-independently evaluate the same committed prompt and compare decision
-fingerprints. Agreement means several nodes reading the same evidence
-reached the same factual conclusions — not that one node's JSON parsed.
+independently fetch every committed evidence reference with
+`gl.nondet.web.get`, verify the bytes against the committed identity,
+judge only the artifacts that verified, and compare decision
+fingerprints. Agreement means several nodes that each retrieved the
+evidence themselves reached the same factual conclusions — not that one
+node's JSON parsed, and not that anyone read a description.
 
 ## Lifecycle
 
@@ -93,45 +101,54 @@ never trigger settlement.
 
 ## Evidence
 
-Four things this contract keeps apart:
+A submitter cannot make a claim into evidence by supplying a description,
+a URL or a hash.
 
 ```
-CLAIM                 "I completed the work."   — submit_deliverable()
-EVIDENCE              a dataset, a commit, an API response
-EVIDENCE COMMITMENT   the on-chain record: id, requirement binding,
-                      content hash, submitter, tick, version, status
-AUTHORITATIVE SOURCE  evidence a third party can independently re-derive
+SUBMITTER CLAIM      "Requirement completed."   shown to the panel as UNTRUSTED
+REFERENCE + IDENTITY https://… + sha256:…       what was committed — not proof
+ACTUAL ARTIFACT      fetched by the leader AND every validator during adjudication
+VERIFICATION         identity of the retrieved bytes compared with the commitment, in code
+EVALUATION           the model reads VERIFIED artifacts only
 ```
 
-Content hashes are written once and never mutated. Replacement is
-additive: `supersede_evidence` marks the original `SUPERSEDED` — hash
-intact, still readable — and appends a new record with an incremented
-version. There is no `update_evidence` or `delete_evidence` anywhere;
-a test asserts their absence from the deployed schema.
+| Type | Acquisition | Identity |
+|---|---|---|
+| `URL` `DOCUMENT` `DATASET` `CSV` `SERVICE_LOG` `AGENT_OUTPUT` | HTTPS GET | `sha256:` of the exact body bytes |
+| `JSON` `API_RESULT` | HTTPS GET, optional `#/json/pointer` | `sha256:` of the canonical JSON payload |
+| `GITHUB_COMMIT` | `<commit url>.patch` | `git:<sha>` — the commit id GitHub serves |
+| `BLOCKCHAIN_TX` `SIGNED_MESSAGE` `OTHER` | **UNSUPPORTED** | recorded, never decides anything |
 
-Types in `AUTHORITATIVE_TYPES` (commits, chain transactions, API
-results, signed messages, datasets, URLs) surface an `authoritative:
-true` flag to the panel, which is told to weight them above prose. See
-[docs/EVIDENCE.md](docs/EVIDENCE.md).
+Each record verifies as `VERIFIED`, `HASH_MISMATCH`, `SOURCE_UNAVAILABLE`,
+`INVALID_ARTIFACT` or `UNSUPPORTED`. The **evidence rule**, applied in code
+on every node: a requirement is PASS or FAIL only if a record bound to it
+VERIFIED; otherwise it is UNDETERMINED, whatever the model said, and an
+UNDETERMINED agreement cannot settle. If nothing verifies, no model is
+consulted at all.
+
+`scripts/evidence_identity.py` prints the identity to commit for a
+reference. It is a convenience with no authority: the contract derives
+the identity again from its own retrieval.
+
+Committed records are never mutated; `supersede_evidence` is additive and
+superseded records are not acquired. See [docs/EVIDENCE.md](docs/EVIDENCE.md)
+for canonicalisation, provenance and failure handling.
 
 ## Consensus
 
 The consensus-critical projection is:
 
 ```
-agreement_id · outcome · per-requirement statuses ·
-deadline_met · evidence_examined
+agreement_id · outcome · per-requirement statuses (after the evidence rule) ·
+deadline_met · evidence_examined · per-record "verified"
 ```
 
-`reasoning` is deliberately excluded. Two honest validators reading
-identical evidence reach the same verdict and do **not** write the same
-paragraph; demanding identical prose would make consensus fail for a
-reason unrelated to correctness. The reasoning is stored verbatim for
-audit — it simply does not participate in agreement.
-
-Requirement results and evidence ids are sorted and deduplicated before
-comparison, so ordering never breaks a round. Only substance does. See
-[docs/CONSENSUS.md](docs/CONSENSUS.md).
+A validator does not read the leader's verification, artifact, reasoning
+or verdict as input. It fetches, verifies and judges for itself, and
+compares the result. `reasoning` is excluded, because two honest
+validators do not write the same paragraph; the *kind* of verification
+failure is excluded, because an unavailable source and a mismatched one
+have the same consequence. See [docs/CONSENSUS.md](docs/CONSENSUS.md).
 
 ## Settlement
 
@@ -201,229 +218,201 @@ exactly 100.
 pip install -r requirements.txt
 
 genvm-lint check contracts/agentsla_core.py     # lint
-pytest tests/direct/ -v                         # 102 tests, ~20s
+pytest tests/direct/ -v                         # 137 tests, offline
+SKIP_INTEGRATION=0 pytest tests/integration -v -s   # live StudioNet, no keys needed
 ```
 
-Deploy:
-
-```bash
-genlayer network set studionet
-genlayer deploy --contract contracts/agentsla_core.py
-genlayer schema <address>
-```
-
-Drive a full lifecycle against a deployment:
-
-```bash
-AGENTSLA_CLIENT_KEY=0x… AGENTSLA_PROVIDER_KEY=0x… \
-  node scripts/drive_e2e.mjs <address>
-
-  node scripts/drive_e2e.mjs <address> --undetermined   # the UNDETERMINED path
-```
+The live suite generates throwaway accounts, funds them from the StudioNet
+faucet, deploys the contract and runs both scenarios below. Set
+`AGENTSLA_CONTRACT=<address>` to run against an existing deployment
+instead.
 
 ## Complete example
 
 ```python
 # client creates
 aid = create_agreement(
-    provider          = "0xA012…0995",
-    service_description = "Deliver a cleaned Q3 2026 market dataset with a quality report.",
-    requirements_json = json.dumps([
-        {"requirement_id": "R1", "description": "Deliver the requested dataset",        "weight": 40},
-        {"requirement_id": "R2", "description": "Dataset meets the agreed quality bar", "weight": 30},
-        {"requirement_id": "R3", "description": "Delivery before the deadline",         "weight": 30},
+    provider            = "0xF50e…6A90",
+    service_description = "Deliver the ACME July 2026 daily dataset with a quality report, by 2026-09-01T00:00:00Z.",
+    requirements_json   = json.dumps([
+        {"requirement_id": "R1", "description": "Deliver ACME daily close and volume for July 2026 as a CSV", "weight": 40},
+        {"requirement_id": "R2", "description": "A quality check reports ≥ 99% field completeness",          "weight": 30},
+        {"requirement_id": "R3", "description": "Delivered on or before 2026-09-01T00:00:00Z",               "weight": 30},
     ]),
-    payment_amount_atto        = 100 * 10**18,
+    payment_amount_atto        = 10**17,
     acceptance_deadline_ticks  = 10,
     service_deadline_ticks     = 30,
     resolution_deadline_ticks  = 200,
 )
 
-fund_agreement(aid)            # client, payable, exactly 100 GEN — terms LOCK here
+fund_agreement(aid)            # client, payable, exact amount — terms LOCK here
 accept_agreement(aid)          # provider — designated wallet only
 
-submit_evidence(aid, "R1", "DATASET",       "https://…parquet", "sha256:8f14…")
-submit_evidence(aid, "R2", "API_RESULT",    "https://…/reports/8821", "sha256:c4ca…")
-submit_evidence(aid, "R3", "GITHUB_COMMIT", "https://…/commit/9fe1c2b", "sha256:e3b0…")
+# provider commits a REFERENCE and an IDENTITY for each requirement
+submit_evidence(aid, "R1", "DATASET",       ".../acme-2026-07-daily.csv",        "sha256:6ae1c7fd…")
+submit_evidence(aid, "R2", "API_RESULT",    ".../quality-report.json#/summary",  "sha256:0495cf67…")
+submit_evidence(aid, "R3", "GITHUB_COMMIT", ".../commit/8517e9ab…",              "git:8517e9ab…")
 submit_deliverable(aid)        # a CLAIM — advances state, proves nothing
 
-request_adjudication(aid)      # LIVE panel → PARTIAL, R3 FAIL, earned_weight 70
+request_adjudication(aid)      # every node fetches all three, all VERIFIED
+                               # → PARTIAL: R1 PASS, R2 PASS, R3 FAIL (commit dated 2026-09-13)
                                # → ACCEPTED, appeal window opens
 
 settle(aid)                    # REFUSED — ACCEPTED is not FINALIZED
 tick(); tick(); tick(); tick()
 finalize(aid)                  # → FINALIZED
-settle(aid)                    # provider 70 GEN, client 30 GEN, escrow 0, SETTLED
+settle(aid)                    # provider 70%, client 30%, escrow 0, SETTLED
 ```
 
 ## Proven live on StudioNet
 
-Both required scenarios, driven end to end against one deployment with a
-real validator panel. No mocks anywhere in these runs.
+`tests/integration/test_end_to_end.py`, run against a real validator
+panel. The evidence is real: files served from commit
+[`8517e9ab`](https://github.com/Olawalter/Agentsla/commit/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a)
+of this repository (branch `live-evidence`) — a daily price CSV, a quality
+report about it, and the commit that delivered them, dated after the
+agreement's stated deadline. The descriptions the provider committed say
+nothing useful ("Dataset delivered.", "Delivered on time."); the verdict had
+to come from the artifacts.
 
-- Contract: [`0xBbDC33708DD50E8FA1854F5769B4Df598a43f377`](https://genlayer-explorer.vercel.app/address/0xBbDC33708DD50E8FA1854F5769B4Df598a43f377)
-- Deploy tx: `0xc69ae766e6b48bf0110de267835f80c4655590140e999a1ae5d81d0d737675f0`
+- Contract: `0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9`, byte-identical to
+  `contracts/agentsla_core.py` in this commit (sha256 of the LF source
+  `881d91680b0c340cf1e6ca403a102d7089ea715e902e9aa048bcbd536963d8e6`)
+- Deploy tx: `0xdcad5c60121fda7876629433b34ffc661446713494d7e4fcdf3044a8a32b903f`
 - Runner: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
+- Every transaction, decision and refusal: [docs/live-run.json](docs/live-run.json)
 
-```bash
-node scripts/drive_e2e.mjs 0xBbDC33708DD50E8FA1854F5769B4Df598a43f377
-node scripts/drive_e2e.mjs 0xBbDC33708DD50E8FA1854F5769B4Df598a43f377 --undetermined
-```
+### SLA-000001 — verified evidence, PARTIAL, settled 70/30
 
-### SLA-000002 — PARTIAL, settled 70/30
-
-Evidence supports R1 and R2; the R3 delivery commit is dated after the
-deadline and says so.
-
-| Step | Tx |
-|---|---|
-| `create_agreement` | `0x91a1e0b0…` |
-| `fund_agreement` (0.1 GEN, terms lock) | `0x6dbb0a7f…` |
-| `accept_agreement` (designated provider) | `0x1c3d8e7a…` |
-| `submit_evidence` ×3 | `0x8f2c…`, `0x4b91…`, `0xa7e3…` |
-| `submit_deliverable` | `0x5d0c…` |
-| **`request_adjudication`** — live panel | `0x2e8b…` |
-| `settle` **while ACCEPTED** → **REVERTED** | `0xfe1a877bd7a3d18d0c8fe01bf61ed414e4299d541cd28200218e7da62981804b` |
-| `finalize` | `0x204578adad171abacbc829812fc590fc1fea4c34638933a05b623b3281bb7a5a` |
-| `settle` | `0x795d3bbbe5ca157f48570601c1625d3adb706955f943afbcb44ab0f19ed29041` |
+| Step | Tx | Result |
+|---|---|---|
+| `create_agreement` → `fund_agreement` (0.1 GEN) → `accept_agreement` | `0x98150006…`, `0x6a210e91…`, `0x12441244…` | MAJORITY_AGREE |
+| `submit_evidence` R1 / R2 / R3 | `0xae8673ec…`, `0x77abf5bb…`, `0x5dbf5248…` | MAJORITY_AGREE |
+| `submit_deliverable` | `0x844583f4…` | MAJORITY_AGREE |
+| **`request_adjudication`** | `0x146c1e8b32298e247f712a993755835c4a254c747bdbea556b46b22686e106cd` | MAJORITY_AGREE, round 1 |
+| `settle` **while ACCEPTED** | `0x6ac7fd02…` | **REFUSED** `illegal transition from ACCEPTED` |
+| `tick` ×4 → `finalize` | `0xfb6b5d6d…` … `0x3c42e91d…` | MAJORITY_AGREE |
+| `settle` | `0xadf3b21e…` | FINALIZED |
 
 ```
-outcome        PARTIAL
-R1  PASS       R2  PASS       R3  FAIL
-deadline_met   false
-examined       [E0001, E0002, E0003]
-earned_weight  70/100          ← derived by the CONTRACT, not the model
+evidence_verification   R1 DATASET        VERIFIED  sha256:6ae1c7fd… = sha256:6ae1c7fd…
+                        R2 API_RESULT     VERIFIED  sha256:0495cf67… = sha256:0495cf67…
+                        R3 GITHUB_COMMIT  VERIFIED  git:8517e9ab…    = git:8517e9ab…
+outcome                 PARTIAL      R1 PASS   R2 PASS   R3 FAIL     deadline_met false
+earned_weight           70/100       ← derived by the CONTRACT
+settlement              provider 70000000000000000   client 30000000000000000   escrow 0
+wallets                 provider balance +70000000000000000, contract −100000000000000000
 ```
 
-> *"R1 is satisfied by authoritative dataset evidence SLA-000002-E0001.
-> R2 is satisfied by the automated validation report SLA-000002-E0002
-> showing 99.4% completeness, exceeding the 99% threshold. R3 failed
-> because authorita…"*
+> *"R3: The verified artifact SLA-000001-E0003 shows the delivery commit
+> date was Sun, 13 Sep 2026. This is after the stated deadline of
+> 2026-09-01T00:00:00Z. Status: FAIL."*
 
-The panel reached for the `authoritative` flag unprompted — rule 3 of
-the adjudication prompt doing its job.
+### SLA-000002 — nothing verifiable, UNDETERMINED
 
-**The finality gate fired.** `settle()` while merely `ACCEPTED`
-**reverted**; only after four ticks and `finalize()` did it succeed.
+Same agreement, evidenced badly: R1 commits the wrong hash for the real
+dataset, R2 points at a file that does not exist, R3 is a signed message.
+Every description says "Requirement completed."
 
-```
-status            SETTLED
-escrow_before     100 000 000 000 000 000 atto   (0.1 GEN)
-provider_payout    70 000 000 000 000 000 atto   (70%)
-client_refund      30 000 000 000 000 000 atto   (30%)
-escrow_after                                 0
-```
-
-`70000000000000000 + 30000000000000000 = 100000000000000000` — balances
-exactly.
-
-### SLA-000001 — UNDETERMINED, escrow frozen
-
-Same agreement shape, but the R3 evidence is a bare provider assertion
-with no timestamp, receipt or external reference.
-
-| Step | Tx |
-|---|---|
-| `create_agreement` | `0x1f4a…` |
-| `fund_agreement` | `0x7c22…` |
-| `accept_agreement` | `0xdb8f69fd9e1a1c9f7afc35719565581aa3e1c4bdb969f52c91b16c2e4c4f2114` |
-| `submit_evidence` ×3 | `0x29cfd27b…`, `0x7d95127a…`, `0xe3d3bfb8…` |
-| `submit_deliverable` | `0xbcf9938d3a7690612e69acbed370275ba7ce14cd2a21bc4527200485dea4e672` |
-| **`request_adjudication`** — live panel | `0x73471548b15702cc76514b3782989544aa357523e424faf7790b42fda5155a64` |
+| Step | Tx | Result |
+|---|---|---|
+| **`request_adjudication`** | `0xf4f666d1b0eae05ce71dee173facd734e490eecb85463067b44ac464f405df39` | MAJORITY_AGREE, round 1 |
+| `settle` | `0xd2d3b41a…` | **REFUSED** `illegal transition from UNDETERMINED` |
+| `finalize` | `0x803a0e7e…` | **REFUSED** `illegal transition from UNDETERMINED` |
 
 ```
-outcome        UNDETERMINED
-R1  PASS       R2  PASS       R3  UNDETERMINED
-deadline_met   true            ← silence is not proof of lateness
+evidence_verification   R1  HASH_MISMATCH       observed sha256 of the real file ≠ committed
+                        R2  SOURCE_UNAVAILABLE  HTTP 404
+                        R3  UNSUPPORTED         no acquisition method for SIGNED_MESSAGE
+outcome                 UNDETERMINED on every requirement
+raw_json                {}        ← no model was consulted
+escrow                  100000000000000000, untouched
 ```
 
-The panel refused to guess, and said why:
+### What the first live attempt taught
 
-> *"R3 UNDETERMINED: SLA-000002-E0003 is not authoritative
-> (`authoritative: false`) and contains only a provider assertion with no
-> timestamp, receipt, commit, or external reference. The evidence rule
-> for R3 explicitly requires 'a timestamped commit or receipt dated on or
-> before the deadline.' … submission tick does not prove when the
-> underlying work was completed."*
+The first run of this suite, on a disposable deployment
+(`0xb85F75664cdc03Ee42e8CD19961dDb376c4Edf5B`), acquired and verified all
+three artifacts correctly — and the panel still split over four rounds
+(`0xbf4d53fd5ee1a2c2fc2e43849651712ba189bb6ecf3ed27a7855e86c77c86e46`,
+MAJORITY_DISAGREE). The leader's own output showed why: it wrote
+`R3: PASS, deadline_met: true`, then reasoned in the `reasoning` field to
+*"R3 FAILS … Outcome is PARTIAL"*. The prompt listed `reasoning` last, so
+models committed statuses before thinking, and its `deadline_met` rule
+read as if it governed a timing requirement. The prompt now asks for
+reasoning first, says a timing requirement is judged like any other, and
+separates `deadline_met` from requirement status. A validator that
+disagrees now prints its own decision fingerprint to its receipt stdout,
+so a future split can be read from the chain.
 
-All three exits were then attempted **as the client** and all three were
-refused on chain, with escrow untouched:
+### The deployment this replaces
 
-```
-settle    → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['FINALIZED']
-finalize  → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']
-appeal    → REFUSED  [EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']
-
-escrow available after all three attempts: 100000000000000000  (deposited 100000000000000000)
-```
-
-### Two consensus lessons, both fixed in the prompt
-
-Earlier deployments returned `MAJORITY_DISAGREE` twice. Both had the
-same root cause and neither was fixed by weakening the consensus rule.
-
-> **A consensus-critical field whose value is a judgement call will
-> split validators.** Every field in the decision fingerprint has to be
-> mechanically derivable from the input.
-
-1. **`evidence_examined`** — which records count as "examined" is an
-   opinion, so validators cited different subsets. Fixed by making it
-   mechanical: the prompt now tells the panel to list every evidence id
-   it was given, and enumerates them explicitly in the prompt body.
-
-2. **`deadline_met`** — when the evidence is *silent* about timing, one
-   validator read "nothing says late → true" and another read "nothing
-   proves on-time → false". Both defensible. Fixed by making the rule
-   total: silence means `true`, because this field gates a penalty and a
-   penalty requires positive proof of lateness. Ambiguity about timing
-   now surfaces in the *requirement's* status, where it belongs — which
-   is exactly what the UNDETERMINED run above shows.
-
-Both fields remain consensus-critical. They simply stopped being
-matters of opinion.
+`0xBbDC33708DD50E8FA1854F5769B4Df598a43f377` ran the previous version,
+whose adjudication never retrieved evidence: the panel judged the
+submitted descriptions, references and hashes as text. Its recorded
+verdicts rest on those descriptions (the R3 "late delivery" was stated in
+a description, and the references were placeholder `*.example` URLs). It
+should not be used.
 
 ## Documentation
 
 | | |
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | layers, state machine, storage shape, where value can leave |
-| [CONSENSUS.md](docs/CONSENSUS.md) | the nondet operation, decision fingerprint, why prose is excluded |
-| [EVIDENCE.md](docs/EVIDENCE.md) | claim vs evidence vs commitment vs authoritative source |
+| [CONSENSUS.md](docs/CONSENSUS.md) | leader and validator code paths, validator independence, the decision fingerprint |
+| [EVIDENCE.md](docs/EVIDENCE.md) | the trust model: supported types, acquisition, canonicalisation, verification, the evidence rule |
 | [SETTLEMENT.md](docs/SETTLEMENT.md) | the formula, rounding, invariants, the three exits |
-| [SECURITY.md](docs/SECURITY.md) | attacks A–I, each mapped to its defence and test |
+| [SECURITY.md](docs/SECURITY.md) | attacks A–I and the evidence-trust attacks, each mapped to its defence and test |
 | [CONTRACT_API.md](docs/CONTRACT_API.md) | every method: purpose, caller, state, failures |
 | [TESTING.md](docs/TESTING.md) | the five layers and how to run them |
 
 ## Testing
 
 ```
-genvm-lint check     passes — 26 methods (10 view, 16 write)
-pytest tests/direct  102 passed
+genvm-lint check              passes — 26 methods (10 view, 16 write)
+pytest tests/direct           137 passed
+pytest tests/integration      2 passed on StudioNet, real panel (6m27s)
+mutation sweep                12/12 evidence-trust defences broken on purpose, all caught
 ```
 
 Five layers — state, escrow, evidence, adjudication, equivalence — plus
-adversarial attacks A through I and the three required scenarios (E2E,
-UNDETERMINED, finality). Every adversarial test asserts that **money did
-not move**, not merely that a status changed.
+attacks A–I, the three required scenarios, and
+`tests/direct/test_evidence_verification.py`: real bytes served through
+mocked sources and verified by the contract itself, false descriptions,
+wrong and modified hashes, unavailable and invalid sources, unsupported
+types, cross-agreement evidence, and — by replaying the contract's own
+validator closure with `direct_vm.run_validator()` — validators that fetch
+for themselves and refuse a leader claiming PASS and verified. Every
+adversarial test asserts that **money did not move**, not merely that a
+status changed.
 
 ## Known limitations
 
-- **The clock is a tick counter, not a wall clock.**
-  `gl.message.datetime` is not populated in every runtime this contract
-  must work in, and a deadline that silently reads zero is worse than
-  one that is explicitly abstract. Deadlines are absolute tick values;
-  `tick()` is public so any account can age one forward. Consequence:
-  deadlines advance with protocol activity rather than elapsed time.
-- **Direct mode runs the leader only.** Validator agreement is proven in
-  `test_equivalence.py`, which drives the normaliser and fingerprint
-  directly — those functions *are* the equivalence rule — and on a live
-  network with a real panel.
+- **A verified artifact is the committed artifact, not a true one.**
+  Verification proves the source served exactly the bytes the submitter
+  committed to. It does not prove who wrote them: a provider can host a
+  fabricated report and it will verify. The panel then judges what that
+  artifact shows. A commit identity proves GitHub serves that commit; its
+  author and date are unauthenticated git metadata.
+- **Unstable sources cannot verify.** A page that changes on every request
+  is `HASH_MISMATCH` by design. Commit stable artifacts — commit-pinned raw
+  files, or a JSON payload selected by pointer.
+- **Unsupported types.** Chain transactions and signed messages are
+  recorded but cannot decide a requirement: reading a transaction needs an
+  RPC someone would have to choose, and the runner has no secp256k1
+  implementation. See docs/EVIDENCE.md.
+- **Every requirement must be evidenced verifiably to settle.** A
+  requirement with no verified record is UNDETERMINED, which blocks
+  settlement until more evidence is adjudicated or `recover_escrow` refunds
+  the client after the resolution deadline.
+- **Canonical JSON follows Python's `json` module** — for example `100.0`
+  stays `100.0`. Submitters in other languages should compute identities
+  with `scripts/evidence_identity.py`.
+- **The clock is a tick counter, not a wall clock.** Deadlines are
+  absolute tick values and `tick()` is public, so deadlines advance with
+  protocol activity rather than elapsed time. Calendar deadlines that
+  evidence must be judged against belong in the agreement's text.
 - **Panel capture is out of scope.** A compromised validator majority
   can agree on a false verdict; that is GenLayer's trust model. The
   appeal path exists so a bad round can be contested and re-run.
-- **Evidence quality is not verifiable on chain.** The contract commits
-  to a hash; it cannot check that a URL still serves those bytes.
-  `AUTHORITATIVE_TYPES` and the prompt push the panel toward
-  independently checkable artefacts, but a determined liar can submit a
-  plausible fake.
 - **No frontend.** Deliberate — the primitive is the deliverable.
