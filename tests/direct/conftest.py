@@ -9,6 +9,7 @@ fixture commits the identity of those bytes, computed below by an
 implementation written independently of the contract's, and the contract
 must fetch them and verify them itself. No mock ever says "verified".
 """
+import datetime
 import hashlib
 import json
 import pathlib
@@ -36,6 +37,51 @@ REQUIREMENTS = [
 ]
 
 REQUIREMENTS_JSON = json.dumps(REQUIREMENTS)
+
+
+# ─── transaction time ─────────────────────────────────────────────────────
+#
+# The contract reads time ONLY from the GenLayer transaction datetime.
+# Tests move that datetime with gltest's own `direct_vm.warp()` — test
+# infrastructure, which has no counterpart in the deployed contract.
+# Every suite starts from a fixed instant so results never depend on the
+# machine running them.
+T0 = 1_789_344_000                      # 2026-09-14T00:00:00Z
+ACCEPTANCE_WINDOW = 3600                # 1 hour
+SERVICE_WINDOW = 7 * 24 * 3600          # 7 days
+RESOLUTION_WINDOW = 14 * 24 * 3600      # 14 days
+APPEAL_WINDOW = 24 * 3600               # 1 day
+WINDOWS = (ACCEPTANCE_WINDOW, SERVICE_WINDOW, RESOLUTION_WINDOW)
+
+
+def iso(unix_seconds: int) -> str:
+    return datetime.datetime.fromtimestamp(
+        int(unix_seconds), tz=datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def tx_time(direct_vm) -> int:
+    """The transaction datetime the next call will carry."""
+    return int(datetime.datetime.fromisoformat(
+        direct_vm._datetime.replace("Z", "+00:00")).timestamp())
+
+
+def warp_to(direct_vm, unix_seconds: int) -> None:
+    direct_vm.warp(iso(unix_seconds))
+
+
+def advance(direct_vm, seconds: int) -> int:
+    target = tx_time(direct_vm) + int(seconds)
+    warp_to(direct_vm, target)
+    return target
+
+
+def pass_deadline(direct_vm, deployed, agreement_id: str, field: str,
+                  by: int = 1) -> int:
+    """Warp to `by` seconds after the agreement's OWN stored deadline."""
+    deadline = deployed.get_agreement(agreement_id)[field]
+    assert deadline > 0, f"{field} has not been set"
+    warp_to(direct_vm, deadline + by)
+    return deadline
 
 
 # ─── identities, computed independently of the contract ───────────────────
@@ -174,7 +220,8 @@ def contract_path():
 
 
 @pytest.fixture
-def deployed(direct_deploy, contract_path):
+def deployed(direct_vm, direct_deploy, contract_path):
+    warp_to(direct_vm, T0)
     return direct_deploy(contract_path)
 
 
@@ -187,13 +234,13 @@ def drafted(direct_vm, deployed, direct_alice, direct_bob):
         service_description="Deliver a cleaned market dataset with validation report.",
         requirements_json=REQUIREMENTS_JSON,
         payment_amount_atto=ESCROW,
-        acceptance_deadline_ticks=10,
-        service_deadline_ticks=50,
-        resolution_deadline_ticks=100,
+        acceptance_window_seconds=ACCEPTANCE_WINDOW,
+        service_window_seconds=SERVICE_WINDOW,
+        resolution_window_seconds=RESOLUTION_WINDOW,
         evidence_rules="Prefer authoritative sources: commits, API results, datasets.",
         settlement_rules="Weighted per-requirement payout; remainder to client.",
         penalty_bps=0,
-        appeal_window_ticks=3,
+        appeal_window_seconds=APPEAL_WINDOW,
     )
 
 

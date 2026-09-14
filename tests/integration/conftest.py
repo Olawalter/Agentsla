@@ -81,14 +81,16 @@ class Live:
         self._chain = studionet
         self.client_acct = Account.create()
         self.provider_acct = Account.create()
+        self.attacker_acct = Account.create()      # funded, party to nothing
         self.reader = create_client(chain=studionet, account=Account.create())
         self.record = {"network": "GenLayer StudioNet", "chain_id": studionet.id,
                        "rpc": RPC, "client": self.client_acct.address,
                        "provider": self.provider_acct.address,
+                       "attacker": self.attacker_acct.address,
                        "started_at": _now(), "transactions": []}
-        for acct in (self.client_acct, self.provider_acct):
+        for acct in (self.client_acct, self.provider_acct, self.attacker_acct):
             rpc("sim_fundAccount", [acct.address, 10 ** 18])
-        for acct in (self.client_acct, self.provider_acct):
+        for acct in (self.client_acct, self.provider_acct, self.attacker_acct):
             self._await(lambda a=acct: self.balance(a.address) > 0, "faucet")
 
         existing = os.environ.get("AGENTSLA_CONTRACT")
@@ -134,6 +136,10 @@ class Live:
         return self.reader.read_contract(address=self.address, function_name=fn,
                                          args=list(args))
 
+    def role(self, acct) -> str:
+        return {id(self.client_acct): "client", id(self.provider_acct): "provider",
+                id(self.attacker_acct): "attacker"}.get(id(acct), "other")
+
     def write(self, acct, fn, *args, value=0, wait="ACCEPTED", step=None):
         c = self._client(acct)
         tx = c.write_contract(address=self.address, function_name=fn,
@@ -144,13 +150,23 @@ class Live:
         entry = {
             "step": step or fn,
             "function": fn,
-            "caller": "client" if acct is self.client_acct else "provider",
+            "caller": self.role(acct),
             "tx": _hex(tx),
             "status": receipt.get("status_name"),
             "decision": receipt.get("result_name"),
             "execution": leader.get("execution_result"),
             "reverted": result.get("status") == "rollback",
         }
+        # The transaction's own timestamp, as the network recorded it — what
+        # the contract's time is compared against.
+        try:
+            info = rpc("eth_getTransactionByHash", [entry["tx"]]) or {}
+            entry["tx_created_at"] = info.get("created_at")
+            entry["tx_created_timestamp"] = info.get("created_timestamp")
+        except Exception:
+            pass
+        if entry["execution"] != "SUCCESS" and not entry["reverted"]:
+            entry["refusal"] = str(result.get("payload") or result)
         if entry["reverted"]:
             entry["refusal"] = str(result.get("payload"))
         self.record["transactions"].append(entry)
@@ -158,6 +174,28 @@ class Live:
               f"{entry['decision']}  {entry['execution']}"
               + (f"  REFUSED: {entry['refusal'][:90]}" if entry["reverted"] else ""))
         return entry
+
+    def attempt(self, acct, fn, *args, step=None):
+        """A call that may never reach execution (e.g. a method that does not
+        exist). Whatever the network or client does is recorded as it is."""
+        try:
+            return self.write(acct, fn, *args, step=step)
+        except Exception as e:
+            entry = {"step": step or fn, "function": fn, "caller": self.role(acct),
+                     "tx": None, "rejected_before_execution": True,
+                     "error": str(e)[:400]}
+            self.record["transactions"].append(entry)
+            print(f"  {entry['step']:<28} REJECTED: {entry['error'][:110]}")
+            return entry
+
+    @staticmethod
+    def sleep_past(unix_seconds: int, margin: int = 45):
+        """Wait in REAL time until `margin` seconds after a deadline, so the
+        next transaction's own datetime is past it. Nothing is advanced."""
+        remaining = int(unix_seconds) + margin - time.time()
+        if remaining > 0:
+            print(f"  … waiting {int(remaining)}s of real time for the deadline to pass")
+            time.sleep(remaining)
 
     def save(self):
         self.record["finished_at"] = _now()

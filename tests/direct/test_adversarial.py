@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from .conftest import ESCROW, REQUIREMENTS_JSON, make_verdict, mock_panel
+from .conftest import ESCROW, REQUIREMENTS_JSON, WINDOWS, make_verdict, mock_panel, pass_deadline
 
 H_ORIG = "sha256:" + "1" * 64
 H_NEW = "sha256:" + "2" * 64
@@ -104,8 +104,7 @@ def test_D_third_party_cannot_settle(
     direct_vm, deployed, direct_alice, direct_charlie, submitted
 ):
     _adjudicate_partial(direct_vm, deployed, direct_alice, submitted)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, submitted, "appeal_deadline")
     direct_vm.sender = direct_alice
     deployed.finalize(submitted)
 
@@ -121,8 +120,7 @@ def test_D_third_party_cannot_finalize(
     direct_vm, deployed, direct_alice, direct_charlie, submitted
 ):
     _adjudicate_partial(direct_vm, deployed, direct_alice, submitted)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, submitted, "appeal_deadline")
     direct_vm.sender = direct_charlie
     with direct_vm.expect_revert("not a party to this agreement"):
         deployed.finalize(submitted)
@@ -132,8 +130,7 @@ def test_D_third_party_cannot_finalize(
 
 def test_E_second_settlement_fails(direct_vm, deployed, direct_alice, submitted):
     _adjudicate_partial(direct_vm, deployed, direct_alice, submitted)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, submitted, "appeal_deadline")
     direct_vm.sender = direct_alice
     deployed.finalize(submitted)
     deployed.settle(submitted)
@@ -167,7 +164,7 @@ def test_F_finalize_blocked_inside_appeal_window(
 ):
     _adjudicate_partial(direct_vm, deployed, direct_alice, submitted)
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("appeal window open until tick"):
+    with direct_vm.expect_revert("appeal window open until"):
         deployed.finalize(submitted)
 
 
@@ -212,8 +209,7 @@ def test_H_llm_payout_field_is_ignored(direct_vm, deployed, direct_alice, submit
     v = deployed.get_verdict(submitted, vid)
     assert v["earned_weight"] == 70
 
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, submitted, "appeal_deadline")
     deployed.finalize(submitted)
     deployed.settle(submitted)
 
@@ -233,7 +229,7 @@ def test_I_evidence_from_another_agreement_rejected(
     direct_vm.sender = direct_alice
     other = deployed.create_agreement(
         str(direct_bob), "unrelated work", REQUIREMENTS_JSON,
-        ESCROW, 10, 50, 100)
+        ESCROW, *WINDOWS)
     direct_vm.value = ESCROW
     deployed.fund_agreement(other)
     direct_vm.value = 0
@@ -259,7 +255,7 @@ def test_I_verdict_citing_foreign_evidence_rejected(
     consensus on a reference does not make the reference legitimate."""
     direct_vm.sender = direct_alice
     other = deployed.create_agreement(
-        str(direct_bob), "unrelated", REQUIREMENTS_JSON, ESCROW, 10, 50, 100)
+        str(direct_bob), "unrelated", REQUIREMENTS_JSON, ESCROW, *WINDOWS)
     direct_vm.value = ESCROW
     deployed.fund_agreement(other)
     direct_vm.value = 0

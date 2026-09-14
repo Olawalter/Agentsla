@@ -37,6 +37,7 @@
 
 from genlayer import *
 
+import datetime
 import hashlib
 import json
 import re
@@ -177,7 +178,15 @@ MAX_REFERENCE = 512         # longer references are refused, never truncated
 MAX_ARTIFACT_BYTES = 4_000_000
 MAX_EXCERPT = 3000          # per verified artifact, what the model reads
 
-APPEAL_WINDOW_TICKS = 3     # ACCEPTED must sit this long before FINALIZED
+# ─── protocol time ───────────────────────────────────────────────────────────
+# Every deadline is Unix seconds taken from the GenLayer TRANSACTION
+# datetime of the lifecycle event that creates it — funding, acceptance, a
+# verdict — plus a window the parties agreed as a term. There is no clock
+# in storage, and no caller can advance, set or supply time. See _now().
+MIN_WINDOW_SECONDS = 60                # acceptance / service / resolution
+MIN_APPEAL_WINDOW_SECONDS = 600        # the finality boundary: room to appeal
+MAX_WINDOW_SECONDS = 366 * 24 * 3600
+DEFAULT_APPEAL_WINDOW_SECONDS = 24 * 3600
 MAX_ADJUDICATION_ROUNDS = 5 # bounds re-adjudication so escrow can't be pinned
 
 
@@ -217,10 +226,11 @@ class Agreement:
     escrow_deposited_atto: u256        # what actually arrived (the MONEY)
     escrow_released_atto: u256
     penalty_bps: u256                  # optional, locked with the terms
-    acceptance_deadline_tick: u256
-    service_deadline_tick: u256
-    resolution_deadline_tick: u256
-    appeal_window_ticks: u256
+    # TERMS — durations in seconds, chosen at creation, frozen at funding.
+    acceptance_window_seconds: u256
+    service_window_seconds: u256
+    resolution_window_seconds: u256
+    appeal_window_seconds: u256
     evidence_rules: str
     settlement_rules: str
     terms_hash: str                    # sha256 over the frozen term set
@@ -228,9 +238,22 @@ class Agreement:
     status: str
     adjudication_round: u256           # how many verdicts have been produced
     latest_verdict_id: u256
-    appeal_deadline_tick: u256         # earliest tick finalize() is legal
-    created_tick: u256
-    updated_tick: u256
+    # LIFECYCLE — Unix seconds from the transaction datetime of the event
+    # that set each one; 0 means the event has not happened. Deadlines are
+    # derived by the contract from these and the windows above, never
+    # supplied by a caller, and never rewritten except by the event that
+    # owns them (a new verdict opens a new appeal window).
+    created_at: u256
+    funded_at: u256
+    accepted_at: u256
+    delivered_at: u256
+    verdict_at: u256
+    finalized_at: u256
+    updated_at: u256
+    acceptance_deadline: u256          # funded_at + acceptance window
+    service_deadline: u256             # accepted_at + service window
+    resolution_deadline: u256          # service_deadline + resolution window
+    appeal_deadline: u256              # verdict_at + appeal window
 
 
 @allow_storage
@@ -244,7 +267,7 @@ class Evidence:
     source_reference: str
     content_hash: str                  # the commitment; never mutated
     description: str
-    submitted_tick: u256
+    submitted_at: u256
     version: u256
     status: str                        # ACTIVE | SUPERSEDED | CHALLENGED
 
@@ -262,7 +285,7 @@ class Verdict:
     reasoning: str                     # explanatory ONLY — never compared
     earned_weight: u256                # derived by the CONTRACT, not the model
     terms_hash: str                    # the terms this verdict judged
-    evaluated_tick: u256
+    evaluated_at: u256
     raw_json: str
     # What each committed record turned out to be when it was fetched:
     # [{evidence_id, requirement_id, status, observed_identity, …}]
@@ -284,7 +307,7 @@ class Settlement:
     earned_weight: u256
     total_weight: u256
     status: str                        # SETTLED
-    settled_tick: u256
+    settled_at: u256
 
 
 # ─── single audited value-emission channel ───────────────────────────────────
@@ -306,6 +329,31 @@ class _Recipient:
 # means leader and validator run byte-identical logic over their own
 # model output, with no hidden dependency on contract state.
 # ═════════════════════════════════════════════════════════════════════════════
+
+def _now() -> int:
+    """Protocol time: the GenLayer transaction's own datetime, in Unix
+    seconds.
+
+    GenVM wires the standard library clock to the transaction datetime
+    (the value `gl.message_raw['datetime']` carries), so every validator
+    re-executing this transaction reads the same instant — it is neither a
+    host wall clock nor anything a caller can choose. This function takes
+    no argument, writes nothing, and calls no web service or model.
+    """
+    return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+
+def _window(name: str, value, minimum: int) -> int:
+    try:
+        seconds = int(value)
+    except Exception:
+        raise gl.vm.UserError(f"{ERROR_EXPECTED} {name} must be an integer")
+    if seconds < minimum or seconds > MAX_WINDOW_SECONDS:
+        raise gl.vm.UserError(
+            f"{ERROR_EXPECTED} {name} must be {minimum}..{MAX_WINDOW_SECONDS} "
+            f"seconds (got {seconds})")
+    return seconds
+
 
 def _parse_requirements(requirements_json: str) -> list:
     """Validate and canonicalise a requirement set.
@@ -820,8 +868,6 @@ def _render_prompt(ctx: dict, specs: list, rows: list) -> str:
         "requirements": ctx["requirements"],
         "evidence_rules": ctx["evidence_rules"],
         "settlement_rules": ctx["settlement_rules"],
-        "service_deadline_tick": ctx["service_deadline_tick"],
-        "current_tick": ctx["current_tick"],
         "evidence": evidence,
     }
     instructions = (
@@ -933,7 +979,6 @@ class AgentSLACore(gl.Contract):
     # protocol
     owner: Address
     version: str
-    current_tick: u256
 
     # registry
     agreements: TreeMap[str, Agreement]
@@ -960,8 +1005,7 @@ class AgentSLACore(gl.Contract):
 
     def __init__(self):
         self.owner = gl.message.sender_address
-        self.version = "AgentSLA-Core-1.1.0"
-        self.current_tick = u256(0)
+        self.version = "AgentSLA-Core-1.2.0"
         self.agreement_count = u256(0)
 
     # ─── internal helpers ────────────────────────────────────────────────────
@@ -971,21 +1015,6 @@ class AgentSLACore(gl.Contract):
 
     def _key(self, addr) -> str:
         return str(addr).lower()
-
-    def _tick(self) -> int:
-        """Deterministic protocol clock.
-
-        Every state-changing call advances it by one. A tick counter
-        rather than a wall clock because `gl.message.datetime` is not
-        populated in every runtime this contract must work in, and a
-        deadline that silently reads zero is worse than one that is
-        explicitly abstract. Deadlines are therefore expressed in ticks
-        and the CONTRACT — never the caller — decides whether one has
-        passed.
-        """
-        n = int(self.current_tick) + 1
-        self.current_tick = u256(n)
-        return n
 
     def _require_agreement(self, aid: str) -> Agreement:
         if aid not in self.agreements:
@@ -1015,7 +1044,7 @@ class AgentSLACore(gl.Contract):
         if new_state not in VALID_STATES:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} invalid state: {new_state}")
         a.status = new_state
-        a.updated_tick = u256(int(self.current_tick))
+        a.updated_at = u256(_now())
 
     def _escrow_available(self, a: Agreement) -> int:
         return int(a.escrow_deposited_atto) - int(a.escrow_released_atto)
@@ -1061,10 +1090,10 @@ class AgentSLACore(gl.Contract):
             "requirements": json.loads(a.requirements_json),
             "payment_amount_atto": int(a.payment_amount_atto),
             "penalty_bps": int(a.penalty_bps),
-            "acceptance_deadline_tick": int(a.acceptance_deadline_tick),
-            "service_deadline_tick": int(a.service_deadline_tick),
-            "resolution_deadline_tick": int(a.resolution_deadline_tick),
-            "appeal_window_ticks": int(a.appeal_window_ticks),
+            "acceptance_window_seconds": int(a.acceptance_window_seconds),
+            "service_window_seconds": int(a.service_window_seconds),
+            "resolution_window_seconds": int(a.resolution_window_seconds),
+            "appeal_window_seconds": int(a.appeal_window_seconds),
             "evidence_rules": a.evidence_rules,
             "settlement_rules": a.settlement_rules,
         }).encode("utf-8"))
@@ -1085,16 +1114,18 @@ class AgentSLACore(gl.Contract):
     @gl.public.write
     def create_agreement(self, provider: str, service_description: str,
                          requirements_json: str, payment_amount_atto: int,
-                         acceptance_deadline_ticks: int,
-                         service_deadline_ticks: int,
-                         resolution_deadline_ticks: int,
+                         acceptance_window_seconds: int,
+                         service_window_seconds: int,
+                         resolution_window_seconds: int,
                          evidence_rules: str = "", settlement_rules: str = "",
                          penalty_bps: int = 0,
-                         appeal_window_ticks: int = APPEAL_WINDOW_TICKS) -> str:
+                         appeal_window_seconds: int = DEFAULT_APPEAL_WINDOW_SECONDS) -> str:
         """Create a DRAFT agreement. Caller becomes the client.
 
-        Terms stay mutable until funding, so a creator can fix a typo
-        before money is involved. The moment escrow lands they freeze.
+        The four windows are DURATIONS the parties agree to, not points in
+        time: no deadline exists yet. Each deadline is created later by the
+        contract, from the transaction datetime of the event that starts
+        its window. Terms stay mutable until funding; then they freeze.
         """
         client = self._sender()
         try:
@@ -1118,19 +1149,16 @@ class AgentSLACore(gl.Contract):
         if pen < 0 or pen > 10_000:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} penalty_bps must be 0..10000")
 
-        acc = int(acceptance_deadline_ticks)
-        svc = int(service_deadline_ticks)
-        res = int(resolution_deadline_ticks)
-        if not (0 < acc < svc < res):
-            raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} deadlines must satisfy "
-                f"0 < acceptance ({acc}) < service ({svc}) < resolution ({res})")
+        acc = _window("acceptance_window_seconds", acceptance_window_seconds,
+                      MIN_WINDOW_SECONDS)
+        svc = _window("service_window_seconds", service_window_seconds,
+                      MIN_WINDOW_SECONDS)
+        res = _window("resolution_window_seconds", resolution_window_seconds,
+                      MIN_WINDOW_SECONDS)
+        appeal = _window("appeal_window_seconds", appeal_window_seconds,
+                         MIN_APPEAL_WINDOW_SECONDS)
 
-        appeal = int(appeal_window_ticks)
-        if appeal < 0:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} appeal_window_ticks must be >= 0")
-
-        now = self._tick()
+        now = _now()
         idx = int(self.agreement_count) + 1
         aid = f"SLA-{idx:06d}"
 
@@ -1145,10 +1173,10 @@ class AgentSLACore(gl.Contract):
             escrow_deposited_atto=u256(0),
             escrow_released_atto=u256(0),
             penalty_bps=u256(pen),
-            acceptance_deadline_tick=u256(now + acc),
-            service_deadline_tick=u256(now + svc),
-            resolution_deadline_tick=u256(now + res),
-            appeal_window_ticks=u256(appeal),
+            acceptance_window_seconds=u256(acc),
+            service_window_seconds=u256(svc),
+            resolution_window_seconds=u256(res),
+            appeal_window_seconds=u256(appeal),
             evidence_rules=_clip(evidence_rules, MAX_STR),
             settlement_rules=_clip(settlement_rules, MAX_STR),
             terms_hash="",
@@ -1156,9 +1184,17 @@ class AgentSLACore(gl.Contract):
             status=S_DRAFT,
             adjudication_round=u256(0),
             latest_verdict_id=u256(0),
-            appeal_deadline_tick=u256(0),
-            created_tick=u256(now),
-            updated_tick=u256(now),
+            created_at=u256(now),
+            funded_at=u256(0),
+            accepted_at=u256(0),
+            delivered_at=u256(0),
+            verdict_at=u256(0),
+            finalized_at=u256(0),
+            updated_at=u256(now),
+            acceptance_deadline=u256(0),
+            service_deadline=u256(0),
+            resolution_deadline=u256(0),
+            appeal_deadline=u256(0),
         )
         a.terms_hash = self._compute_terms_hash(a)
 
@@ -1195,7 +1231,7 @@ class AgentSLACore(gl.Contract):
         a.evidence_rules = _clip(evidence_rules, MAX_STR)
         a.settlement_rules = _clip(settlement_rules, MAX_STR)
         a.terms_hash = self._compute_terms_hash(a)
-        a.updated_tick = u256(self._tick())
+        a.updated_at = u256(_now())
         return a.terms_hash
 
     # ═══ 2 · escrow ═══════════════════════════════════════════════════════════
@@ -1224,23 +1260,35 @@ class AgentSLACore(gl.Contract):
         a.escrow_deposited_atto = u256(int(a.escrow_deposited_atto) + sent)
         a.terms_hash = self._compute_terms_hash(a)
         a.terms_locked = True
+        # The acceptance window opens when there is escrow to accept.
+        now = _now()
+        a.funded_at = u256(now)
+        a.acceptance_deadline = u256(now + int(a.acceptance_window_seconds))
         self._set_state(a, S_FUNDED)
-        self._tick()
 
     # ═══ 3 · lifecycle ════════════════════════════════════════════════════════
 
     @gl.public.write
     def accept_agreement(self, agreement_id: str) -> None:
-        """Provider accepts. Only the designated provider wallet may."""
+        """Provider accepts. Only the designated provider wallet may.
+
+        Legal until the acceptance deadline, judged against THIS
+        transaction's datetime. Acceptance starts the service window, and
+        the resolution window follows it.
+        """
         a = self._require_agreement(agreement_id)
         self._require_provider(a)
         self._require_state(a, {S_FUNDED})
         self._require_terms_intact(a)
-        now = self._tick()
-        if now > int(a.acceptance_deadline_tick):
+        now = _now()
+        if now > int(a.acceptance_deadline):
             raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} acceptance deadline passed at tick "
-                f"{int(a.acceptance_deadline_tick)} (now {now})")
+                f"{ERROR_EXPECTED} acceptance deadline passed at "
+                f"{int(a.acceptance_deadline)} (transaction time {now})")
+        a.accepted_at = u256(now)
+        a.service_deadline = u256(now + int(a.service_window_seconds))
+        a.resolution_deadline = u256(
+            int(a.service_deadline) + int(a.resolution_window_seconds))
         self._set_state(a, S_ACTIVE)
 
     @gl.public.write
@@ -1260,27 +1308,30 @@ class AgentSLACore(gl.Contract):
                 len(self.evidence_by_agreement[a.agreement_id]) == 0:
             raise gl.vm.UserError(
                 f"{ERROR_EXPECTED} submit evidence before declaring delivery")
-        now = self._tick()
-        if now > int(a.service_deadline_tick):
-            # Late delivery is allowed to reach adjudication; the panel
-            # reports deadline_met=False and the settlement rules decide
-            # what that costs. The contract does not silently forgive it.
-            pass
+        # Late delivery may still be adjudicated, and is not forgiven: the
+        # transaction datetime is recorded, and settlement applies the
+        # agreed penalty when it falls after the service deadline.
+        a.delivered_at = u256(_now())
         self._set_state(a, S_SUBMITTED)
 
     @gl.public.write
     def expire_agreement(self, agreement_id: str) -> None:
-        """Mark an agreement expired once the service deadline passes
-        with no delivery. Either party may call; the contract checks the
-        clock itself."""
+        """Mark an agreement expired: FUNDED past its acceptance deadline,
+        or ACTIVE past its service deadline with no delivery. Either party
+        may call; the deadline is judged against this transaction's
+        datetime, which the caller cannot choose."""
         a = self._require_agreement(agreement_id)
         self._require_party(a)
         self._require_state(a, {S_FUNDED, S_ACTIVE})
-        now = self._tick()
-        if now <= int(a.service_deadline_tick):
+        now = _now()
+        if a.status == S_FUNDED:
+            which, deadline = "acceptance", int(a.acceptance_deadline)
+        else:
+            which, deadline = "service", int(a.service_deadline)
+        if now <= deadline:
             raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} service deadline not reached "
-                f"(tick {int(a.service_deadline_tick)}, now {now})")
+                f"{ERROR_EXPECTED} {which} deadline not reached "
+                f"({deadline}, transaction time {now})")
         self._set_state(a, S_EXPIRED)
 
     @gl.public.write
@@ -1293,11 +1344,9 @@ class AgentSLACore(gl.Contract):
         if refund > 0:
             a.escrow_released_atto = u256(int(a.escrow_released_atto) + refund)
             self._set_state(a, S_CANCELLED)
-            self._tick()
             self._send_gen(a.client, refund)
         else:
             self._set_state(a, S_CANCELLED)
-            self._tick()
 
     # ═══ 4 · evidence ═════════════════════════════════════════════════════════
 
@@ -1364,7 +1413,7 @@ class AgentSLACore(gl.Contract):
             source_reference=source_reference,
             content_hash=chash,
             description=_clip(description, MAX_STR),
-            submitted_tick=u256(self._tick()),
+            submitted_at=u256(_now()),
             version=u256(1),
             status=EV_ACTIVE,
         )
@@ -1420,7 +1469,7 @@ class AgentSLACore(gl.Contract):
             source_reference=source_reference,
             content_hash=chash,
             description=_clip(description, MAX_STR),
-            submitted_tick=u256(self._tick()),
+            submitted_at=u256(_now()),
             version=u256(int(old.version) + 1),
             status=EV_ACTIVE,
         )
@@ -1446,7 +1495,7 @@ class AgentSLACore(gl.Contract):
         e.status = EV_CHALLENGED
         e.description = _clip(
             f"{e.description}\n[CHALLENGED] {_clip(reason, MAX_SHORT)}", MAX_STR)
-        self._tick()
+        a.updated_at = u256(_now())
 
     # ═══ 5 · adjudication ═════════════════════════════════════════════════════
 
@@ -1672,7 +1721,7 @@ class AgentSLACore(gl.Contract):
                                "record_status")}
             for s in specs
         ]).encode("utf-8"))
-        now = self._tick()
+        now = _now()
         ctx = {
             "agreement_id": a.agreement_id,
             "terms_hash": a.terms_hash,
@@ -1680,8 +1729,6 @@ class AgentSLACore(gl.Contract):
             "requirements": reqs,
             "evidence_rules": a.evidence_rules,
             "settlement_rules": a.settlement_rules,
-            "service_deadline_tick": int(a.service_deadline_tick),
-            "current_tick": now,
         }
 
         prior_state = a.status
@@ -1727,7 +1774,7 @@ class AgentSLACore(gl.Contract):
             reasoning=str(norm["reasoning"]),
             earned_weight=u256(earned),
             terms_hash=a.terms_hash,
-            evaluated_tick=u256(int(self.current_tick)),
+            evaluated_at=u256(now),
             raw_json=_canon(raw),
             evidence_verification_json=_canon(rows),
             evidence_commitment_hash=commitment_hash,
@@ -1746,13 +1793,15 @@ class AgentSLACore(gl.Contract):
         # FAIL. It parks the agreement with escrow intact and offers only
         # two exits: more evidence + another round, or the recovery path
         # after the resolution deadline.
+        a.verdict_at = u256(now)
         if norm["outcome"] == O_UNDETERMINED:
             self._set_state(a, S_UNDETERMINED)
-            a.appeal_deadline_tick = u256(0)
+            a.appeal_deadline = u256(0)
         else:
+            # The appeal window opens at the verdict's own transaction
+            # datetime. A later verdict (after an appeal) opens a new one.
             self._set_state(a, S_ACCEPTED)
-            a.appeal_deadline_tick = u256(
-                int(self.current_tick) + int(a.appeal_window_ticks))
+            a.appeal_deadline = u256(now + int(a.appeal_window_seconds))
         return verdict_id
 
     # ═══ 6 · appeal and finality ══════════════════════════════════════════════
@@ -1771,12 +1820,12 @@ class AgentSLACore(gl.Contract):
         self._require_state(a, {S_ACCEPTED})
         if not _clip(reason, MAX_STR).strip():
             raise gl.vm.UserError(f"{ERROR_EXPECTED} appeal reason required")
-        now = self._tick()
-        if now > int(a.appeal_deadline_tick):
+        now = _now()
+        if now > int(a.appeal_deadline):
             raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} appeal window closed at tick "
-                f"{int(a.appeal_deadline_tick)} (now {now})")
-        a.appeal_deadline_tick = u256(0)
+                f"{ERROR_EXPECTED} appeal window closed at "
+                f"{int(a.appeal_deadline)} (transaction time {now})")
+        a.appeal_deadline = u256(0)
         self._set_state(a, S_APPEALED)
 
     @gl.public.write
@@ -1792,11 +1841,12 @@ class AgentSLACore(gl.Contract):
         self._require_party(a)
         self._require_state(a, {S_ACCEPTED})
         self._require_terms_intact(a)
-        now = self._tick()
-        if now < int(a.appeal_deadline_tick):
+        now = _now()
+        if now <= int(a.appeal_deadline):
             raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} appeal window open until tick "
-                f"{int(a.appeal_deadline_tick)} (now {now})")
+                f"{ERROR_EXPECTED} appeal window open until "
+                f"{int(a.appeal_deadline)} (transaction time {now})")
+        a.finalized_at = u256(now)
         self._set_state(a, S_FINALIZED)
 
     # ═══ 7 · deterministic settlement ═════════════════════════════════════════
@@ -1806,7 +1856,7 @@ class AgentSLACore(gl.Contract):
 
             provider_gross = escrow * earned_weight / 100      (floor)
             penalty        = provider_gross * penalty_bps / 10000
-                             — only when the deadline was missed
+                             — only when delivered_at > service_deadline
             provider_net   = provider_gross - penalty
             client_refund  = escrow - provider_net
 
@@ -1824,8 +1874,13 @@ class AgentSLACore(gl.Contract):
 
         provider_gross = (escrow * earned) // WEIGHT_TOTAL
 
+        # Whether delivery was late is decided HERE, from two transaction
+        # datetimes the contract recorded itself — not by the panel. The
+        # panel's `deadline_met` is its reading of the evidence, kept on the
+        # verdict for the record; no amount depends on it.
+        late = int(a.delivered_at) > int(a.service_deadline)
         penalty = 0
-        if not bool(v.deadline_met) and int(a.penalty_bps) > 0:
+        if late and int(a.penalty_bps) > 0:
             penalty = (provider_gross * int(a.penalty_bps)) // 10_000
         provider_net = provider_gross - penalty
         if provider_net < 0:
@@ -1889,7 +1944,7 @@ class AgentSLACore(gl.Contract):
             earned_weight=u256(int(v.earned_weight)),
             total_weight=u256(WEIGHT_TOTAL),
             status="SETTLED",
-            settled_tick=u256(self._tick()),
+            settled_at=u256(_now()),
         )
         self.settlements[agreement_id] = s
         self._set_state(a, S_SETTLED)
@@ -1912,23 +1967,23 @@ class AgentSLACore(gl.Contract):
         a = self._require_agreement(agreement_id)
         self._require_party(a)
         self._require_state(a, {S_EXPIRED, S_UNDETERMINED, S_APPEALED})
-        now = self._tick()
-        if now <= int(a.resolution_deadline_tick):
+        now = _now()
+        if int(a.accepted_at) == 0:
+            # Never accepted: the provider has no claim on the escrow, and
+            # EXPIRED already required the acceptance deadline to pass.
+            which, deadline = "acceptance", int(a.acceptance_deadline)
+        else:
+            which, deadline = "resolution", int(a.resolution_deadline)
+        if now <= deadline:
             raise gl.vm.UserError(
-                f"{ERROR_EXPECTED} resolution deadline not reached "
-                f"(tick {int(a.resolution_deadline_tick)}, now {now})")
+                f"{ERROR_EXPECTED} {which} deadline not reached "
+                f"({deadline}, transaction time {now})")
         refund = self._escrow_available(a)
         if refund <= 0:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} no escrow to recover")
         a.escrow_released_atto = u256(int(a.escrow_released_atto) + refund)
         self._set_state(a, S_REFUNDED)
         self._send_gen(a.client, refund)
-
-    @gl.public.write
-    def tick(self) -> int:
-        """Advance the protocol clock. Any account may call; used to age
-        past a deadline or an appeal window."""
-        return self._tick()
 
     # ─── the one place value leaves this contract ────────────────────────────
     def _send_gen(self, to_address, amount_atto: int) -> None:
@@ -1947,9 +2002,12 @@ class AgentSLACore(gl.Contract):
         return {
             "version": self.version,
             "agreement_count": int(self.agreement_count),
-            "current_tick": int(self.current_tick),
             "weight_total": WEIGHT_TOTAL,
-            "default_appeal_window_ticks": APPEAL_WINDOW_TICKS,
+            "time_source": "GenLayer transaction datetime (Unix seconds)",
+            "min_window_seconds": MIN_WINDOW_SECONDS,
+            "min_appeal_window_seconds": MIN_APPEAL_WINDOW_SECONDS,
+            "max_window_seconds": MAX_WINDOW_SECONDS,
+            "default_appeal_window_seconds": DEFAULT_APPEAL_WINDOW_SECONDS,
             "max_adjudication_rounds": MAX_ADJUDICATION_ROUNDS,
             "evidence_types": sorted(EVIDENCE_TYPES),
             "authoritative_types": sorted(AUTHORITATIVE_TYPES),
@@ -1971,11 +2029,22 @@ class AgentSLACore(gl.Contract):
             "escrow_released": int(a.escrow_released_atto),
             "escrow_available": self._escrow_available(a),
             "penalty_bps": int(a.penalty_bps),
-            "acceptance_deadline_tick": int(a.acceptance_deadline_tick),
-            "service_deadline_tick": int(a.service_deadline_tick),
-            "resolution_deadline_tick": int(a.resolution_deadline_tick),
-            "appeal_window_ticks": int(a.appeal_window_ticks),
-            "appeal_deadline_tick": int(a.appeal_deadline_tick),
+            "acceptance_window_seconds": int(a.acceptance_window_seconds),
+            "service_window_seconds": int(a.service_window_seconds),
+            "resolution_window_seconds": int(a.resolution_window_seconds),
+            "appeal_window_seconds": int(a.appeal_window_seconds),
+            "created_at": int(a.created_at),
+            "funded_at": int(a.funded_at),
+            "accepted_at": int(a.accepted_at),
+            "delivered_at": int(a.delivered_at),
+            "verdict_at": int(a.verdict_at),
+            "finalized_at": int(a.finalized_at),
+            "acceptance_deadline": int(a.acceptance_deadline),
+            "service_deadline": int(a.service_deadline),
+            "resolution_deadline": int(a.resolution_deadline),
+            "appeal_deadline": int(a.appeal_deadline),
+            "delivered_late": int(a.delivered_at) > 0
+                and int(a.delivered_at) > int(a.service_deadline),
             "evidence_rules": a.evidence_rules,
             "settlement_rules": a.settlement_rules,
             "terms_hash": a.terms_hash,
@@ -1983,8 +2052,7 @@ class AgentSLACore(gl.Contract):
             "status": a.status,
             "adjudication_round": int(a.adjudication_round),
             "latest_verdict_id": int(a.latest_verdict_id),
-            "created_tick": int(a.created_tick),
-            "updated_tick": int(a.updated_tick),
+            "updated_at": int(a.updated_at),
         }
 
     @gl.public.view
@@ -2012,7 +2080,7 @@ class AgentSLACore(gl.Contract):
                     "source_reference": e.source_reference,
                     "content_hash": e.content_hash,
                     "description": e.description,
-                    "submitted_tick": int(e.submitted_tick),
+                    "submitted_at": int(e.submitted_at),
                     "version": int(e.version),
                     "status": e.status,
                 })
@@ -2053,7 +2121,7 @@ class AgentSLACore(gl.Contract):
             "earned_weight": int(v.earned_weight),
             "total_weight": WEIGHT_TOTAL,
             "terms_hash": v.terms_hash,
-            "evaluated_tick": int(v.evaluated_tick),
+            "evaluated_at": int(v.evaluated_at),
             "raw_json": v.raw_json,
             "evidence_verification": json.loads(v.evidence_verification_json or "[]"),
             "evidence_commitment_hash": v.evidence_commitment_hash,
@@ -2088,7 +2156,7 @@ class AgentSLACore(gl.Contract):
             "earned_weight": int(s.earned_weight),
             "total_weight": int(s.total_weight),
             "status": s.status,
-            "settled_tick": int(s.settled_tick),
+            "settled_at": int(s.settled_at),
         }
 
     @gl.public.view
@@ -2102,8 +2170,11 @@ class AgentSLACore(gl.Contract):
             "escrow_available": self._escrow_available(a),
             "adjudication_round": int(a.adjudication_round),
             "latest_verdict_id": int(a.latest_verdict_id),
-            "appeal_deadline_tick": int(a.appeal_deadline_tick),
-            "current_tick": int(self.current_tick),
+            "acceptance_deadline": int(a.acceptance_deadline),
+            "service_deadline": int(a.service_deadline),
+            "resolution_deadline": int(a.resolution_deadline),
+            "appeal_deadline": int(a.appeal_deadline),
+            "finalized_at": int(a.finalized_at),
             "can_settle": a.status == S_FINALIZED,
         }
 
@@ -2124,6 +2195,6 @@ class AgentSLACore(gl.Contract):
                 "payment_amount_atto": int(a.payment_amount_atto),
                 "escrow_available": self._escrow_available(a),
                 "adjudication_round": int(a.adjudication_round),
-                "created_tick": int(a.created_tick),
+                "created_at": int(a.created_at),
             })
         return {"total": n, "offset": start, "count": len(rows), "rows": rows}

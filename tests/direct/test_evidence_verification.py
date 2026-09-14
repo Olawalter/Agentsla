@@ -26,8 +26,8 @@ import json
 
 from .conftest import (
     COMMIT_PATCH, COMMIT_PATCH_URL, COMMIT_REF, COMMIT_SHA, DATASET, DATASET_URL,
-    ESCROW, REPORT, REPORT_URL, REQUIREMENTS_JSON, commit_canonical_evidence,
-    json_identity, make_verdict, mock_panel, mock_sources, sha256_identity,
+    ESCROW, REPORT, REPORT_URL, REQUIREMENTS_JSON, WINDOWS, commit_canonical_evidence,
+    json_identity, make_verdict, mock_panel, mock_sources, pass_deadline, sha256_identity,
 )
 
 FETCH_URLS = {DATASET_URL, REPORT_URL, COMMIT_PATCH_URL}
@@ -376,7 +376,7 @@ def test_E_evidence_of_another_agreement_is_never_acquired_or_usable(
     every route that names A's record through B is refused."""
     direct_vm.sender = direct_alice
     other = deployed.create_agreement(str(direct_bob), "unrelated", REQUIREMENTS_JSON,
-                                      ESCROW, 10, 50, 100)
+                                      ESCROW, *WINDOWS)
     direct_vm.value = ESCROW
     deployed.fund_agreement(other)
     direct_vm.value = 0
@@ -599,8 +599,7 @@ def test_E2E_verified_evidence_partial_settles_70_30(
     assert deployed.get_agreement(submitted)["status"] == "ACCEPTED"
     with direct_vm.expect_revert("illegal transition from ACCEPTED"):
         deployed.settle(submitted)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, submitted, "appeal_deadline")
     deployed.finalize(submitted)
     deployed.settle(submitted)
 

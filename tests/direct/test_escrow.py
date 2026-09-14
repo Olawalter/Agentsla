@@ -1,5 +1,5 @@
 """TEST LAYER 2 — escrow custody, funding rules, accounting."""
-from .conftest import ESCROW
+from .conftest import ESCROW, pass_deadline
 
 
 def test_exact_funding_accepted(direct_vm, deployed, direct_alice, drafted):
@@ -82,8 +82,7 @@ def test_cancel_after_accept_refused(direct_vm, deployed, direct_alice, active):
 def test_recover_escrow_before_deadline_refused(
     direct_vm, deployed, direct_alice, active
 ):
-    for _ in range(55):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, active, "service_deadline")
     direct_vm.sender = direct_alice
     deployed.expire_agreement(active)
     with direct_vm.expect_revert("resolution deadline not reached"):
@@ -91,12 +90,10 @@ def test_recover_escrow_before_deadline_refused(
 
 
 def test_recover_escrow_after_deadline(direct_vm, deployed, direct_alice, active):
-    for _ in range(55):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, active, "service_deadline")
     direct_vm.sender = direct_alice
     deployed.expire_agreement(active)
-    for _ in range(60):          # resolution_deadline_ticks = 100
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, active, "resolution_deadline")
     deployed.recover_escrow(active)
     a = deployed.get_agreement(active)
     assert a["status"] == "REFUNDED"

@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from .conftest import (ESCROW, REQUIREMENTS_JSON, commit_canonical_evidence,
+from .conftest import (ESCROW, REQUIREMENTS_JSON, WINDOWS, commit_canonical_evidence,
+                       pass_deadline,
                        json_identity, make_verdict, mock_panel)
 
 # A re-run of the quality report, served from a second, stable endpoint.
@@ -50,8 +51,7 @@ def test_E2E_partial_performance_70_30(
     with direct_vm.expect_revert("illegal transition from ACCEPTED"):
         deployed.settle(aid)
 
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     assert deployed.get_agreement(aid)["status"] == "FINALIZED"
     assert deployed.get_state(aid)["can_settle"] is True
@@ -143,8 +143,7 @@ def test_UNDETERMINED_recovery_after_resolution_deadline(
     deployed.request_adjudication(aid)
     assert deployed.get_agreement(aid)["status"] == "UNDETERMINED"
 
-    for _ in range(110):        # resolution_deadline_ticks = 100
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "resolution_deadline")
     deployed.recover_escrow(aid)
     a = deployed.get_agreement(aid)
     assert a["status"] == "REFUNDED"
@@ -166,8 +165,7 @@ def test_FINALITY_accepted_is_not_finalized(direct_vm, deployed, direct_alice, s
     with direct_vm.expect_revert("illegal transition from ACCEPTED"):
         deployed.settle(aid)
 
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     assert deployed.get_state(aid)["can_settle"] is True
     deployed.settle(aid)
@@ -205,8 +203,7 @@ def test_FINALITY_appeal_prevents_stale_settlement(
     v2 = deployed.request_adjudication(aid)
     assert deployed.get_verdict(aid, v2)["earned_weight"] == 70
 
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     deployed.settle(aid)
 
@@ -224,8 +221,7 @@ def test_appeal_after_window_closed_refused(direct_vm, deployed, direct_alice, s
         evidence_examined=_ids(deployed, aid)))
     direct_vm.sender = direct_alice
     deployed.request_adjudication(aid)
-    for _ in range(6):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     with direct_vm.expect_revert("appeal window closed"):
         deployed.appeal(aid, "too late")
 
@@ -239,8 +235,7 @@ def test_full_pass_pays_provider_everything(direct_vm, deployed, direct_alice, s
         evidence_examined=_ids(deployed, aid)))
     direct_vm.sender = direct_alice
     deployed.request_adjudication(aid)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     deployed.settle(aid)
     s = deployed.get_settlement(aid)
@@ -255,8 +250,7 @@ def test_full_fail_refunds_client_everything(direct_vm, deployed, direct_alice, 
         evidence_examined=_ids(deployed, aid)))
     direct_vm.sender = direct_alice
     deployed.request_adjudication(aid)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     deployed.settle(aid)
     s = deployed.get_settlement(aid)
@@ -273,7 +267,7 @@ def test_rounding_remainder_goes_to_client(
     direct_vm.sender = direct_alice
     aid = deployed.create_agreement(
         str(direct_bob), "odd-amount job", REQUIREMENTS_JSON,
-        odd_escrow, 10, 50, 100)
+        odd_escrow, *WINDOWS)
     direct_vm.value = odd_escrow
     deployed.fund_agreement(aid)
     direct_vm.value = 0
@@ -287,8 +281,7 @@ def test_rounding_remainder_goes_to_client(
         evidence_examined=_ids(deployed, aid)))
     direct_vm.sender = direct_alice
     deployed.request_adjudication(aid)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     deployed.settle(aid)
 
@@ -300,37 +293,60 @@ def test_rounding_remainder_goes_to_client(
     assert s["escrow_after"] == 0
 
 
-def test_penalty_applies_only_when_deadline_missed(
-    direct_vm, deployed, direct_alice, direct_bob
-):
-    direct_vm.sender = direct_alice
+def _penalised_settlement(direct_vm, deployed, alice, bob, deliver_late: bool,
+                          panel_says_deadline_met: bool):
+    alice_sender, bob_sender = alice, bob
+    direct_vm.sender = alice_sender
     aid = deployed.create_agreement(
-        str(direct_bob), "penalised job", REQUIREMENTS_JSON,
-        ESCROW, 10, 50, 100, "", "", 1000)      # penalty_bps = 10%
+        str(bob_sender), "penalised job", REQUIREMENTS_JSON,
+        ESCROW, *WINDOWS, "", "", 1000)      # penalty_bps = 10%
     direct_vm.value = ESCROW
     deployed.fund_agreement(aid)
     direct_vm.value = 0
-    direct_vm.sender = direct_bob
+    direct_vm.sender = bob_sender
     deployed.accept_agreement(aid)
     commit_canonical_evidence(deployed, aid)
-    deployed.submit_deliverable(aid, "late")
+    if deliver_late:
+        pass_deadline(direct_vm, deployed, aid, "service_deadline", by=3600)
+    deployed.submit_deliverable(aid, "delivered")
 
     mock_panel(direct_vm, make_verdict(
         aid, {"R1": "PASS", "R2": "PASS", "R3": "FAIL"},
-        deadline_met=False, evidence_examined=_ids(deployed, aid)))
-    direct_vm.sender = direct_alice
+        deadline_met=panel_says_deadline_met, evidence_examined=_ids(deployed, aid)))
+    direct_vm.sender = alice_sender
     deployed.request_adjudication(aid)
-    for _ in range(4):
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, aid, "appeal_deadline")
     deployed.finalize(aid)
     deployed.settle(aid)
+    return deployed.get_agreement(aid), deployed.get_settlement(aid)
 
-    s = deployed.get_settlement(aid)
+
+def test_penalty_applies_when_delivery_transaction_was_late(
+    direct_vm, deployed, direct_alice, direct_bob
+):
+    """Lateness is the recorded delivery datetime against the recorded
+    service deadline — even when the panel's reading says on time."""
+    a, s = _penalised_settlement(direct_vm, deployed, direct_alice, direct_bob,
+                                 deliver_late=True, panel_says_deadline_met=True)
+    assert a["delivered_late"] is True
+    assert a["delivered_at"] == a["service_deadline"] + 3600
     gross = ESCROW * 70 // 100
     penalty = gross * 1000 // 10_000
     assert s["penalty"] == penalty
     assert s["provider_payout"] == gross - penalty
     assert s["provider_payout"] + s["client_refund"] == ESCROW
+
+
+def test_no_penalty_for_on_time_delivery_whatever_the_panel_says(
+    direct_vm, deployed, direct_alice, direct_bob
+):
+    """A model that believes delivery was late cannot cost the provider:
+    whether time elapsed is not a question a model answers."""
+    a, s = _penalised_settlement(direct_vm, deployed, direct_alice, direct_bob,
+                                 deliver_late=False, panel_says_deadline_met=False)
+    assert a["delivered_late"] is False
+    assert s["penalty"] == 0
+    assert s["provider_payout"] == ESCROW * 70 // 100
 
 
 def test_settlement_requires_a_verdict(direct_vm, deployed, direct_alice, funded):

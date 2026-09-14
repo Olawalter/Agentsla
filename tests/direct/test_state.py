@@ -1,12 +1,14 @@
 """TEST LAYER 1 — agreement state, requirements, authorization, terms."""
 import json
 
-from .conftest import ESCROW, REQUIREMENTS, REQUIREMENTS_JSON
+from .conftest import ESCROW, REQUIREMENTS, REQUIREMENTS_JSON, pass_deadline
 
 
 def test_protocol_info(direct_vm, deployed):
     info = deployed.get_protocol_info()
-    assert info["version"] == "AgentSLA-Core-1.1.0"
+    assert info["version"] == "AgentSLA-Core-1.2.0"
+    assert info["time_source"] == "GenLayer transaction datetime (Unix seconds)"
+    assert "current_tick" not in info
     assert info["weight_total"] == 100
     assert info["agreement_count"] == 0
     assert "GITHUB_COMMIT" in info["authoritative_types"]
@@ -90,12 +92,24 @@ def test_malformed_requirements_json_rejected(direct_vm, deployed, direct_alice,
         deployed.create_agreement(str(direct_bob), "svc", "{nope", 100, 5, 10, 20)
 
 
-def test_deadline_ordering_enforced(direct_vm, deployed, direct_alice, direct_bob):
+def test_windows_are_bounded_durations(direct_vm, deployed, direct_alice, direct_bob):
+    """A window is a term in seconds, bounded both ways. Too short to act in,
+    or so long it is a disguised absolute timestamp, is refused."""
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("deadlines must satisfy"):
-        # service before acceptance
-        deployed.create_agreement(
-            str(direct_bob), "svc", REQUIREMENTS_JSON, 100, 50, 10, 100)
+    day = 24 * 3600
+    cases = [
+        ((59, day, day), "acceptance_window_seconds must be 60.."),
+        ((3600, 0, day), "service_window_seconds must be 60.."),
+        ((3600, day, -5), "resolution_window_seconds must be 60.."),
+        # a far-future Unix timestamp passed where a duration belongs
+        ((3600, 4_102_444_800, day), "service_window_seconds must be 60.."),
+    ]
+    for windows, message in cases:
+        with direct_vm.expect_revert(message):
+            deployed.create_agreement(str(direct_bob), "svc", REQUIREMENTS_JSON, 100, *windows)
+    with direct_vm.expect_revert("appeal_window_seconds must be 600.."):
+        deployed.create_agreement(str(direct_bob), "svc", REQUIREMENTS_JSON, 100,
+                                  3600, day, day, "", "", 0, 599)
 
 
 def test_zero_payment_rejected(direct_vm, deployed, direct_alice, direct_bob):
@@ -135,8 +149,7 @@ def test_accept_moves_to_active(direct_vm, deployed, direct_bob, funded):
 
 
 def test_accept_after_deadline_refused(direct_vm, deployed, direct_bob, funded):
-    for _ in range(12):          # acceptance_deadline_ticks = 10
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, funded, "acceptance_deadline")
     direct_vm.sender = direct_bob
     with direct_vm.expect_revert("acceptance deadline passed"):
         deployed.accept_agreement(funded)
@@ -155,8 +168,7 @@ def test_expire_before_deadline_refused(direct_vm, deployed, direct_alice, activ
 
 
 def test_expire_after_deadline(direct_vm, deployed, direct_alice, active):
-    for _ in range(55):          # service_deadline_ticks = 50
-        deployed.tick()
+    pass_deadline(direct_vm, deployed, active, "service_deadline")
     direct_vm.sender = direct_alice
     deployed.expire_agreement(active)
     assert deployed.get_agreement(active)["status"] == "EXPIRED"
@@ -173,7 +185,7 @@ def test_get_state_probe(direct_vm, deployed, funded):
 def test_list_agreements(direct_vm, deployed, direct_alice, direct_bob, drafted):
     direct_vm.sender = direct_alice
     deployed.create_agreement(
-        str(direct_bob), "second", REQUIREMENTS_JSON, 500, 5, 10, 20)
+        str(direct_bob), "second", REQUIREMENTS_JSON, 500, 3600, 86400, 86400)
     page = deployed.list_agreements(0, 10)
     assert page["total"] == 2
     assert [r["agreement_id"] for r in page["rows"]] == ["SLA-000001", "SLA-000002"]
