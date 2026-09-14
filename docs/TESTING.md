@@ -20,10 +20,10 @@ validator closure, so validator-side behaviour is tested directly.
 
 | Gate | Result |
 |---|---|
-| `genvm-lint check` | passes — 26 methods (10 view, 16 write) |
-| `pytest tests/direct/` | **137 passed** |
-| `pytest tests/integration` | **2 passed** on StudioNet, real panel — verified PARTIAL settled 70/30; unverifiable evidence UNDETERMINED |
-| Mutation sweep | **12/12** evidence-trust defences broken in the contract, each caught |
+| `genvm-lint check` | passes — 25 methods (10 view, 15 write) |
+| `pytest tests/direct/` | **155 passed** |
+| `pytest tests/integration` | **3 passed** on StudioNet (24m52s), real panel and real deadlines — acceptance window attacked then lapsing in real time with refund; verified PARTIAL refused inside the real appeal window, then finalized and settled 70/30; unverifiable evidence UNDETERMINED with early recovery refused. Every contract timestamp equals its transaction's network timestamp |
+| Mutation sweeps | **12/12** evidence-trust defences and **12/12** clock / fund-safety defences broken in the contract, each caught |
 
 ## Layout
 
@@ -37,20 +37,23 @@ tests/direct/
   test_equivalence.py     layer 5 — the equivalence rule itself
   test_adversarial.py     attacks A–I
   test_settlement.py      the three required scenarios + arithmetic
+  test_clock.py           transaction-time deadlines: the 13 clock attacks,
+                          fund paths at every stage, lifecycle before/after
   test_evidence_verification.py
                           contract-side acquisition and verification; steward tests A–J,
                           leader-lies, validator independence, the verified E2E
 tests/integration/
   conftest.py             throwaway funded accounts, deploy, transaction recorder
-  test_end_to_end.py      live: verified PARTIAL 70/30, and nothing-verifiable UNDETERMINED
+  test_end_to_end.py      live: acceptance lapse + refund, verified PARTIAL 70/30 after the
+                          real appeal window, nothing-verifiable UNDETERMINED
 ```
 
 ## Layer 1 — state
 
 Agreement creation and its refusals: self-dealing provider, zero
 quantity or payment, empty description, malformed requirements,
-duplicate ids, zero weights, weights not summing to 100, inverted
-deadlines. Then authorization (only the client may amend, only the
+duplicate ids, zero weights, weights not summing to 100, windows out
+of bounds (including a Unix timestamp passed where a duration belongs). Then authorization (only the client may amend, only the
 designated provider may accept), the acceptance deadline, the
 evidence-before-delivery gate, and expiry.
 
@@ -133,7 +136,8 @@ Two are worth calling out:
 
 **E2E (§44)** — 100 GEN, R1 PASS (40) + R2 PASS (30) + R3 FAIL (30).
 Walks create → fund → accept → evidence → deliver → adjudicate →
-finality refusal → tick → finalize → settle, and asserts provider 70
+finality refusal → transaction time past the appeal deadline → finalize
+→ settle, and asserts provider 70
 GEN, client 30 GEN, escrow 0, SETTLED, sum exact.
 
 **UNDETERMINED (§45)** — a panel returning UNDETERMINED parks the
@@ -142,8 +146,8 @@ refused; more evidence plus a second round resolves it to PASS; both
 verdicts are retained. A companion test proves `recover_escrow` still
 works if nobody can resolve it.
 
-**Finality (§46)** — ACCEPTED cannot settle; after ticking and
-`finalize()` it can. Then the sharper case: an accepted 100/100 PASS is
+**Finality (§46)** — ACCEPTED cannot settle; once a transaction's
+datetime is past the appeal deadline, `finalize()` succeeds and it can. Then the sharper case: an accepted 100/100 PASS is
 appealed, re-adjudicated to 70/100 PARTIAL, and the settlement is
 asserted to use the **second** verdict.
 
@@ -153,7 +157,8 @@ Full PASS pays everything; full FAIL refunds everything; partial pays
 the weighted subset. Rounding uses a deliberately indivisible escrow
 (`1000000000000000007` atto) and asserts `provider + client == escrow`
 exactly, with the remainder to the client. Penalties apply only when
-`deadline_met` is false.
+the delivery transaction was after the service deadline — whatever the
+panel's `deadline_met` says.
 
 ## Evidence verification
 

@@ -6,7 +6,7 @@
 escrow          = escrow_deposited − escrow_released      (real custody)
 earned_weight   = Σ weight[r] for every requirement the panel marked PASS
 provider_gross  = escrow × earned_weight ÷ 100            (integer floor)
-penalty         = provider_gross × penalty_bps ÷ 10000    only if deadline_met is false
+penalty         = provider_gross × penalty_bps ÷ 10000    only if delivered_at > service_deadline
 provider_net    = max(0, provider_gross − penalty)
 client_refund   = escrow − provider_net
 ```
@@ -130,16 +130,21 @@ the same formula.
 ## Penalties
 
 Optional, `penalty_bps`, locked with the terms at funding. Applied
-deterministically and **only when `deadline_met` is false**:
+deterministically and **only when delivery was late** — when the
+provider's `submit_deliverable` transaction datetime is after the
+service deadline the contract derived from the acceptance transaction:
 
 ```
 penalty = provider_gross × penalty_bps ÷ 10000
 ```
 
-The panel establishes the *fact* (was the deadline met). The contract
-applies the *consequence* (a rate agreed before the work started). The
-model is never asked how much a delay should cost.
-`test_penalty_applies_only_when_deadline_missed` pins both halves.
+Both the fact and the consequence are the contract's. Whether delivery
+was late is two datetimes it recorded itself, not a question for the
+panel; the rate was agreed before the work started. The panel's
+`deadline_met` stays on the verdict as its reading of the evidence and
+moves no amount. `test_penalty_applies_when_delivery_transaction_was_late`
+and `test_no_penalty_for_on_time_delivery_whatever_the_panel_says` pin both
+directions.
 
 ## The three exits
 
@@ -147,7 +152,7 @@ model is never asked how much a delay should cost.
 |---|---|---|
 | `settle` | FINALIZED, verdict not UNDETERMINED | provider + client, per weights |
 | `cancel_agreement` | DRAFT, FUNDED | client (full) |
-| `recover_escrow` | EXPIRED, UNDETERMINED, APPEALED — past resolution deadline | client (full) |
+| `recover_escrow` | EXPIRED, UNDETERMINED, APPEALED — transaction datetime past the resolution deadline (acceptance deadline if never accepted) | client (full) |
 
 All three route through `_send_gen`, the single audited emission
 channel, and all three follow the same zero-before-transfer ordering.
@@ -158,7 +163,7 @@ channel, and all three follow the same zero-before-transfer ordering.
 
 ```
 request_adjudication  →  ACCEPTED     (appeal window open, can_settle false)
-      tick × N        →
+   ⟨real time passes⟩ →   (appeal_deadline = verdict datetime + window)
       finalize()      →  FINALIZED    (can_settle true)
       settle()        →  SETTLED
 ```
@@ -175,7 +180,8 @@ state. From there:
 - `finalize()` — illegal
 - `appeal()` — illegal (there is no decided verdict to contest)
 - `request_adjudication()` — **legal**, after more evidence
-- `recover_escrow()` — legal once the resolution deadline passes
+- `recover_escrow()` — legal once a transaction's datetime is past the
+  resolution deadline
 
 Escrow stays whole throughout. `test_G_undetermined_cannot_settle` and
 `test_UNDETERMINED_protects_escrow_then_retries` cover both the refusal

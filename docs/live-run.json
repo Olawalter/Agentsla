@@ -2,289 +2,525 @@
   "network": "GenLayer StudioNet",
   "chain_id": 61999,
   "rpc": "https://studio.genlayer.com/api",
-  "client": "0xb2bdeBd8CdcF49148A1dc96473b342fC5caFd434",
-  "provider": "0xF50eE0581A5848Dd5F98b4B8cD81940f01A06A90",
-  "started_at": "2026-09-13T07:50:57Z",
+  "client": "0x1AD27D4C690b4D96b709ba5401D55f65d10ca885",
+  "provider": "0xDdC25482265ed8149a0Ba8eB563E94bC43Ce99b4",
+  "attacker": "0xCfDc581CEE05A80CC23a143b95ac2f2B7CC13Eae",
+  "started_at": "2026-09-14T15:14:46Z",
   "transactions": [
     {
       "step": "create_agreement",
       "function": "create_agreement",
       "caller": "client",
-      "tx": "0x981500064c874589d678a010bcd02ea1a2f3c4698bfa88090be466392de0cb0a",
+      "tx": "0xb89b415d01cb0f235a3a622ce2375d3eb172a37d8ae9974c14fb2f9f21efe47c",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:15:01.700934+00:00",
+      "tx_created_timestamp": "1789398901"
     },
     {
       "step": "fund_agreement",
       "function": "fund_agreement",
       "caller": "client",
-      "tx": "0x6a210e91615e37a5e8704643c628ee41e692142444d9142e77e5561242af8229",
+      "tx": "0x7649757e850fe3e0344d2897b41582544a131a001fbd2eb98db6e57585be988e",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:15:26.292861+00:00",
+      "tx_created_timestamp": "1789398926"
     },
     {
-      "step": "accept_agreement",
-      "function": "accept_agreement",
-      "caller": "provider",
-      "tx": "0x1244124416ab4c9ba4e6b75fa921a20696b6a4f7d03a0ab1a55afa851bd314d2",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "submit_evidence R1",
-      "function": "submit_evidence",
-      "caller": "provider",
-      "tx": "0xae8673ec09cc2b67c5385d385bd3d0c4fddeb2b0376544ff6ff4b3b124456871",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "submit_evidence R2",
-      "function": "submit_evidence",
-      "caller": "provider",
-      "tx": "0x77abf5bb1f46e431c98f37129a0b42308167da559c4218c798570a356e514f18",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "submit_evidence R3",
-      "function": "submit_evidence",
-      "caller": "provider",
-      "tx": "0x5dbf524888f92e42b5f9b67989932e8ad27312ac37b46f6193e62562eec2506f",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "submit_deliverable",
-      "function": "submit_deliverable",
-      "caller": "provider",
-      "tx": "0x844583f4e543572e0e781e85db5280a38fcc7fd19282cb362a0b6b7ed009733f",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "request_adjudication",
-      "function": "request_adjudication",
+      "step": "expire before deadline",
+      "function": "expire_agreement",
       "caller": "client",
-      "tx": "0x146c1e8b32298e247f712a993755835c4a254c747bdbea556b46b22686e106cd",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "settle while ACCEPTED",
-      "function": "settle",
-      "caller": "client",
-      "tx": "0x6ac7fd02534b1696734b9195830855609967f8e4d085a5a7c55db8073df3651b",
+      "tx": "0x977a0d6717f76b9df7acc0b121ed2a97e6c3628276c3413dace3c1483d80049c",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "ERROR",
       "reverted": true,
-      "refusal": "[EXPECTED] illegal transition from ACCEPTED; expected one of ['FINALIZED']"
+      "tx_created_at": "2026-09-14T15:15:39.788807+00:00",
+      "tx_created_timestamp": "1789398939",
+      "refusal": "[EXPECTED] acceptance deadline not reached (1789399226, transaction time 1789398939)"
     },
     {
-      "step": "tick 1",
+      "step": "attacker: tick()",
       "function": "tick",
+      "caller": "attacker",
+      "tx": "0x0bb88e3ebf47346740766aa31cdec923621cf9d4789d1bc1b5af867f57e44d7c",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:15:57.179443+00:00",
+      "tx_created_timestamp": "1789398957",
+      "refusal": "exit_code 1"
+    },
+    {
+      "step": "attacker: expire_agreement",
+      "function": "expire_agreement",
+      "caller": "attacker",
+      "tx": "0xee3b0a5daf3f73f3637357acde82edb525982276b0cd7a282ad2d1b67b748a9c",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:16:20.037765+00:00",
+      "tx_created_timestamp": "1789398980",
+      "refusal": "[EXPECTED] not a party to this agreement"
+    },
+    {
+      "step": "attacker: recover_escrow",
+      "function": "recover_escrow",
+      "caller": "attacker",
+      "tx": "0xe4311f4418660513e4e2c850a3dde94bed24b01a70294630f59217757fe3c7f4",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:16:31.610409+00:00",
+      "tx_created_timestamp": "1789398991",
+      "refusal": "[EXPECTED] not a party to this agreement"
+    },
+    {
+      "step": "accept after deadline",
+      "function": "accept_agreement",
+      "caller": "provider",
+      "tx": "0xb0ef7854be118f4f8b5f32b818ae115f84510c64fcbd14a297726df17ecaa4b7",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:21:17.587657+00:00",
+      "tx_created_timestamp": "1789399277",
+      "refusal": "[EXPECTED] acceptance deadline passed at 1789399226 (transaction time 1789399277)"
+    },
+    {
+      "step": "expire after deadline",
+      "function": "expire_agreement",
       "caller": "client",
-      "tx": "0xfb6b5d6db494e891461bf7425a553e4671b44196f05ca70d85733f04fd355983",
+      "tx": "0xec94ddd2997bc4deff04055acd4d061250c79ed8d9c94014f3531027eca364cd",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:21:31.718459+00:00",
+      "tx_created_timestamp": "1789399291"
     },
     {
-      "step": "tick 2",
-      "function": "tick",
+      "step": "recover_escrow",
+      "function": "recover_escrow",
       "caller": "client",
-      "tx": "0xc14acab941df8db7909468bcf22ae7a4cba07367590c2156bb21b5f8c7bb7de7",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "tick 3",
-      "function": "tick",
-      "caller": "client",
-      "tx": "0xaaf5b945c942916e5fe68da2dad5a171b826ccfe321737adc292838f4b9b4311",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "tick 4",
-      "function": "tick",
-      "caller": "client",
-      "tx": "0x2ca26f70b74170d0a9e98e8a4a5b67092e574f0bb530db70a073073be89413e0",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "finalize",
-      "function": "finalize",
-      "caller": "client",
-      "tx": "0x3c42e91dd863d7fabbd64d0b0e45b825155927d67364e5e3ca08bbba5931c197",
-      "status": "ACCEPTED",
-      "decision": "MAJORITY_AGREE",
-      "execution": "SUCCESS",
-      "reverted": false
-    },
-    {
-      "step": "settle",
-      "function": "settle",
-      "caller": "client",
-      "tx": "0xadf3b21e34c107a4e6867bbde43d854b7350cd4daf7cbd8ea75636c79dda4c71",
+      "tx": "0x3e4740f769b6753e3eb897dc997293e70bb30086933923c95d30fbc8da61c3fd",
       "status": "FINALIZED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:21:45.428610+00:00",
+      "tx_created_timestamp": "1789399305"
     },
     {
       "step": "create_agreement",
       "function": "create_agreement",
       "caller": "client",
-      "tx": "0x3158258e24b7633925a2773b19744df12eedeb5a438f5b6fe9edb70e9a241318",
+      "tx": "0x7de1e2b36bf5a808801842f21baba52f3bdfc587899199a0ad10952a1535d1ef",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:22:33.755963+00:00",
+      "tx_created_timestamp": "1789399353"
     },
     {
       "step": "fund_agreement",
       "function": "fund_agreement",
       "caller": "client",
-      "tx": "0x3b94f47ce4074eb4e5784eb5022b4f2842b9ce5f0c97a47f4417ae2ce5c4d3f1",
+      "tx": "0x8c309ae2819cc5c8ec6e513edaa71a78cca8efe5045af4fab1eebb53c566a51a",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:22:48.195319+00:00",
+      "tx_created_timestamp": "1789399368"
     },
     {
       "step": "accept_agreement",
       "function": "accept_agreement",
       "caller": "provider",
-      "tx": "0x73dd18871176fbd315a767127f86c28a4860b73565c13804c306b24ddcdb0f14",
+      "tx": "0xb1f1a463cf76d202afa74a953513b47490b7aca89b3ba36913e779a3bbccd05b",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:23:02.468159+00:00",
+      "tx_created_timestamp": "1789399382"
     },
     {
-      "step": "submit_evidence R1 (wrong hash)",
+      "step": "submit_evidence R1",
       "function": "submit_evidence",
       "caller": "provider",
-      "tx": "0xdad6c2d81aa2b44c92ac849401416cecb481031f9e7e456661018be36f33fbd5",
+      "tx": "0x361a808f9d6d2395f29f03d7b8fe97fe8cd358b7063dc71915d55954aa01dff0",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:23:22.200767+00:00",
+      "tx_created_timestamp": "1789399402"
     },
     {
-      "step": "submit_evidence R2 (404)",
+      "step": "submit_evidence R2",
       "function": "submit_evidence",
       "caller": "provider",
-      "tx": "0xada0efc94de23217991fe1967f1e59dc396e9b098c44abcfcd56c5c2a0f4f13f",
+      "tx": "0x8f90e99bc60b954b80be934d013d2d250079a90246116f031e5609e3defa1caf",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:23:34.844427+00:00",
+      "tx_created_timestamp": "1789399414"
     },
     {
-      "step": "submit_evidence R3 (unsupported)",
+      "step": "submit_evidence R3",
       "function": "submit_evidence",
       "caller": "provider",
-      "tx": "0xb2b580bd404df13b7310e8cc5e769f02945d40531c87bb0ff8b7f5b84fff9f86",
+      "tx": "0x882f8b85a00dc178921e182003c6e9cb8c400fe8f72d8b2ae69aa7452fe5e8f9",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:23:48.134343+00:00",
+      "tx_created_timestamp": "1789399428"
     },
     {
       "step": "submit_deliverable",
       "function": "submit_deliverable",
       "caller": "provider",
-      "tx": "0xef87466d824a7a4086b19bde8fe9111ab1d4ca5049acde4674c905a1f7742505",
+      "tx": "0x87b5b1f6624f9e5256d3fab10037bea2e5c4089267efa55bb08324d59dceea1c",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:24:00.850827+00:00",
+      "tx_created_timestamp": "1789399440"
     },
     {
       "step": "request_adjudication",
       "function": "request_adjudication",
       "caller": "client",
-      "tx": "0xf4f666d1b0eae05ce71dee173facd734e490eecb85463067b44ac464f405df39",
+      "tx": "0xbc0d0ffe01962d811ee2624d4f7c1a9db1baa3741a2f03714901c96a4e5a2401",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "SUCCESS",
-      "reverted": false
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:24:13.527975+00:00",
+      "tx_created_timestamp": "1789399453"
+    },
+    {
+      "step": "settle while ACCEPTED",
+      "function": "settle",
+      "caller": "client",
+      "tx": "0x34e8256ef031168f7a03e1c8bf5304d362ab0aefc22c3216b93085fde7229d7f",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:25:47.598806+00:00",
+      "tx_created_timestamp": "1789399547",
+      "refusal": "[EXPECTED] illegal transition from ACCEPTED; expected one of ['FINALIZED']"
+    },
+    {
+      "step": "finalize inside appeal window",
+      "function": "finalize",
+      "caller": "client",
+      "tx": "0x0ef52adeea2f7509269c284896eec7535fd8da4629fb22a077a6dc7dd275d9d9",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:26:11.117496+00:00",
+      "tx_created_timestamp": "1789399571",
+      "refusal": "[EXPECTED] appeal window open until 1789400053 (transaction time 1789399571)"
+    },
+    {
+      "step": "attacker: finalize",
+      "function": "finalize",
+      "caller": "attacker",
+      "tx": "0xb094df94f8308dc4596292366b90e95a057d3bca405429d6f11460f1a93ff9d8",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:26:22.628716+00:00",
+      "tx_created_timestamp": "1789399582",
+      "refusal": "[EXPECTED] not a party to this agreement"
+    },
+    {
+      "step": "attacker: tick()",
+      "function": "tick",
+      "caller": "attacker",
+      "tx": "0xe8954c9340768d607a6ddf235dfc8254b9884022cc8306a51f776d33c68b6a66",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:26:33.453435+00:00",
+      "tx_created_timestamp": "1789399593",
+      "refusal": "exit_code 1"
+    },
+    {
+      "step": "finalize after appeal window",
+      "function": "finalize",
+      "caller": "client",
+      "tx": "0xd2ec5b9386ff41109a6696caebfb2721fe5779be6f5e465e21c8dc043fd4f1b2",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:35:57.238350+00:00",
+      "tx_created_timestamp": "1789400157"
+    },
+    {
+      "step": "settle",
+      "function": "settle",
+      "caller": "client",
+      "tx": "0x6cae9e742b00cc6ecae4039d74c31861fe10cda58b5587d62bdd9abfd36f8b66",
+      "status": "FINALIZED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:36:12.213933+00:00",
+      "tx_created_timestamp": "1789400172"
+    },
+    {
+      "step": "create_agreement",
+      "function": "create_agreement",
+      "caller": "client",
+      "tx": "0x5a330fde312d375bd0d0f12a8862e0be1f026a5a9c6bb884bcd5a93697e9f1a4",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:37:06.748602+00:00",
+      "tx_created_timestamp": "1789400226"
+    },
+    {
+      "step": "fund_agreement",
+      "function": "fund_agreement",
+      "caller": "client",
+      "tx": "0xcb5bfd80fe52ff54fb431f690710f3d30082b5b2cf817a668c3f7ff83983920b",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:37:20.000953+00:00",
+      "tx_created_timestamp": "1789400240"
+    },
+    {
+      "step": "accept_agreement",
+      "function": "accept_agreement",
+      "caller": "provider",
+      "tx": "0x62625e699b912ec4529fde61cfbe8f4d26337f9d5427ec54c5a7d8252ff15de5",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:37:32.639546+00:00",
+      "tx_created_timestamp": "1789400252"
+    },
+    {
+      "step": "submit_evidence R1 (wrong hash)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0xc7b2564f9ac4dd16d1be81a7cad7acf7bb1dbb7f2a24bc527df5ed380026d1eb",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:37:44.079477+00:00",
+      "tx_created_timestamp": "1789400264"
+    },
+    {
+      "step": "submit_evidence R2 (404)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0x2ba89b37bab2d26a7d39777ba85ad0a7ed95da8d18a4c60720c1edd72f1a85f6",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:37:55.372748+00:00",
+      "tx_created_timestamp": "1789400275"
+    },
+    {
+      "step": "submit_evidence R3 (unsupported)",
+      "function": "submit_evidence",
+      "caller": "provider",
+      "tx": "0x429effdf4f4435b7ef8590a13ba8b8d84be61ea0e80c74d5f5a69dec8fa65f44",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:38:06.594910+00:00",
+      "tx_created_timestamp": "1789400286"
+    },
+    {
+      "step": "submit_deliverable",
+      "function": "submit_deliverable",
+      "caller": "provider",
+      "tx": "0xf71b747129c2388705663334a2ddf6baed7f1aa3a44a21d219a0268506b85154",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:38:19.110813+00:00",
+      "tx_created_timestamp": "1789400299"
+    },
+    {
+      "step": "request_adjudication",
+      "function": "request_adjudication",
+      "caller": "client",
+      "tx": "0x419d6e8855ec6dc96ef55e3cb82c00cadb3fad2bb290035641841800283696b8",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "SUCCESS",
+      "reverted": false,
+      "tx_created_at": "2026-09-14T15:38:30.598802+00:00",
+      "tx_created_timestamp": "1789400310"
     },
     {
       "step": "settle while UNDETERMINED",
       "function": "settle",
       "caller": "client",
-      "tx": "0xd2d3b41ac87ff4879789623cad62e33e3f47bbf44f1df4dc9412c41797753242",
+      "tx": "0x581e7e53e6926cdca5f398106726ac52de1f765da0f32c975ec0295b85a0be65",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "ERROR",
       "reverted": true,
+      "tx_created_at": "2026-09-14T15:38:51.681940+00:00",
+      "tx_created_timestamp": "1789400331",
       "refusal": "[EXPECTED] illegal transition from UNDETERMINED; expected one of ['FINALIZED']"
     },
     {
       "step": "finalize while UNDETERMINED",
       "function": "finalize",
       "caller": "client",
-      "tx": "0x803a0e7e643953fe9a094e103cec9e53bd69e5335b0e112b44656e8130493628",
+      "tx": "0x3bc5dcb2539614ae7c3686097debc5a60fc6eb1871d0b2316b659564c970cd70",
       "status": "ACCEPTED",
       "decision": "MAJORITY_AGREE",
       "execution": "ERROR",
       "reverted": true,
+      "tx_created_at": "2026-09-14T15:39:04.658819+00:00",
+      "tx_created_timestamp": "1789400344",
       "refusal": "[EXPECTED] illegal transition from UNDETERMINED; expected one of ['ACCEPTED']"
+    },
+    {
+      "step": "recover before resolution deadline",
+      "function": "recover_escrow",
+      "caller": "client",
+      "tx": "0xc2fc12db8a9d7f85b212ac02908b9be090f8d99fb5d295398e45d54bd444a73e",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:39:16.782987+00:00",
+      "tx_created_timestamp": "1789400356",
+      "refusal": "[EXPECTED] resolution deadline not reached (1789407452, transaction time 1789400356)"
+    },
+    {
+      "step": "attacker: recover",
+      "function": "recover_escrow",
+      "caller": "attacker",
+      "tx": "0x572398e2d902b8127cf7fbdad3ec7796c912f87035ef9d8f07704d9c31108c8c",
+      "status": "ACCEPTED",
+      "decision": "MAJORITY_AGREE",
+      "execution": "ERROR",
+      "reverted": true,
+      "tx_created_at": "2026-09-14T15:39:29.368016+00:00",
+      "tx_created_timestamp": "1789400369",
+      "refusal": "[EXPECTED] not a party to this agreement"
     }
   ],
   "deployment": {
-    "address": "0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9",
-    "tx": "0xdcad5c60121fda7876629433b34ffc661446713494d7e4fcdf3044a8a32b903f",
-    "decision": "MAJORITY_AGREE"
+    "address": "0x0a93b5b3C7C9F35c49853F12E7851345b76Ae829",
+    "reused": true
   },
-  "contract": "0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9",
+  "contract": "0x0a93b5b3C7C9F35c49853F12E7851345b76Ae829",
+  "time_bindings": [
+    {
+      "field": "SLA-000004 funded_at",
+      "contract_value": 1789398926,
+      "tx": "0x7649757e850fe3e0344d2897b41582544a131a001fbd2eb98db6e57585be988e",
+      "tx_created_timestamp": 1789398926,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000005 funded_at",
+      "contract_value": 1789399368,
+      "tx": "0x8c309ae2819cc5c8ec6e513edaa71a78cca8efe5045af4fab1eebb53c566a51a",
+      "tx_created_timestamp": 1789399368,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000005 accepted_at",
+      "contract_value": 1789399382,
+      "tx": "0xb1f1a463cf76d202afa74a953513b47490b7aca89b3ba36913e779a3bbccd05b",
+      "tx_created_timestamp": 1789399382,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000005 delivered_at",
+      "contract_value": 1789399440,
+      "tx": "0x87b5b1f6624f9e5256d3fab10037bea2e5c4089267efa55bb08324d59dceea1c",
+      "tx_created_timestamp": 1789399440,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000005 verdict_at",
+      "contract_value": 1789399453,
+      "tx": "0xbc0d0ffe01962d811ee2624d4f7c1a9db1baa3741a2f03714901c96a4e5a2401",
+      "tx_created_timestamp": 1789399453,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000005 finalized_at",
+      "contract_value": 1789400157,
+      "tx": "0xd2ec5b9386ff41109a6696caebfb2721fe5779be6f5e465e21c8dc043fd4f1b2",
+      "tx_created_timestamp": 1789400157,
+      "difference_seconds": 0
+    },
+    {
+      "field": "SLA-000006 funded_at",
+      "contract_value": 1789400240,
+      "tx": "0xcb5bfd80fe52ff54fb431f690710f3d30082b5b2cf817a668c3f7ff83983920b",
+      "tx_created_timestamp": 1789400240,
+      "difference_seconds": 0
+    }
+  ],
   "scenario_1": {
-    "agreement_id": "SLA-000001",
+    "agreement_id": "SLA-000004",
+    "acceptance_deadline": 1789399226,
+    "client_balance_delta": 100000000000000000
+  },
+  "scenario_2": {
+    "agreement_id": "SLA-000005",
     "verdict": {
-      "agreement_id": "SLA-000001",
+      "agreement_id": "SLA-000005",
       "deadline_met": false,
       "earned_weight": 70,
-      "evaluated_tick": 8,
-      "evidence_commitment_hash": "sha256:c1923139adc0a9675822b7b3e5559c54a19dca17621fa6d64c8d5e2d8c440bab",
+      "evaluated_at": 1789399453,
+      "evidence_commitment_hash": "sha256:3f08d61c851247874716bc1df38b87ff92868a5d1c94a0c4d8adb466a7607f83",
       "evidence_examined": [
-        "SLA-000001-E0001",
-        "SLA-000001-E0002",
-        "SLA-000001-E0003"
+        "SLA-000005-E0001",
+        "SLA-000005-E0002",
+        "SLA-000005-E0003"
       ],
       "evidence_verification": [
         {
           "acquisition": "HTTPS_BYTES",
           "byte_length": 674,
           "detail": "retrieved artifact matches the committed identity",
-          "evidence_id": "SLA-000001-E0001",
+          "evidence_id": "SLA-000005-E0001",
           "evidence_type": "DATASET",
           "expected_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
           "observed_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
@@ -296,7 +532,7 @@
           "acquisition": "HTTPS_JSON",
           "byte_length": 367,
           "detail": "retrieved artifact matches the committed identity",
-          "evidence_id": "SLA-000001-E0002",
+          "evidence_id": "SLA-000005-E0002",
           "evidence_type": "API_RESULT",
           "expected_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
           "observed_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
@@ -308,7 +544,7 @@
           "acquisition": "GITHUB_COMMIT",
           "byte_length": 2449,
           "detail": "retrieved artifact matches the committed identity",
-          "evidence_id": "SLA-000001-E0003",
+          "evidence_id": "SLA-000005-E0003",
           "evidence_type": "GITHUB_COMMIT",
           "expected_identity": "git:8517e9ab0848558b790cee8f8c9a0e533ec7cc3a",
           "observed_identity": "git:8517e9ab0848558b790cee8f8c9a0e533ec7cc3a",
@@ -318,8 +554,8 @@
         }
       ],
       "outcome": "PARTIAL",
-      "raw_json": "{\"agreement_id\":\"SLA-000001\",\"deadline_met\":false,\"evidence_examined\":[\"SLA-000001-E0001\",\"SLA-000001-E0002\",\"SLA-000001-E0003\"],\"outcome\":\"PARTIAL\",\"reasoning\":\"Requirement R1: The verified artifact SLA-000001-E0001 contains the ACME daily closing price and volume data for the month of July 2026 in CSV format as required. Status: PASS. Requirement R2: The verified artifact SLA-000001-E0002 reports a 'field_completeness_pct' of 100.0, which exceeds the minimum requirement of 99%. Status: PASS. Requirement R3: The verified artifact SLA-000001-E0003 shows the delivery commit date was Sun, 13 Sep 2026. This is after the stated deadline of 2026-09-01T00:00:00Z. Status: FAIL.\",\"requirements\":[{\"requirement_id\":\"R1\",\"status\":\"PASS\"},{\"requirement_id\":\"R2\",\"status\":\"PASS\"},{\"requirement_id\":\"R3\",\"status\":\"FAIL\"}]}",
-      "reasoning": "Requirement R1: The verified artifact SLA-000001-E0001 contains the ACME daily closing price and volume data for the month of July 2026 in CSV format as required. Status: PASS. Requirement R2: The verified artifact SLA-000001-E0002 reports a 'field_completeness_pct' of 100.0, which exceeds the minimum requirement of 99%. Status: PASS. Requirement R3: The verified artifact SLA-000001-E0003 shows the delivery commit date was Sun, 13 Sep 2026. This is after the stated deadline of 2026-09-01T00:00:00Z. Status: FAIL.",
+      "raw_json": "{\"agreement_id\":\"SLA-000005\",\"deadline_met\":false,\"evidence_examined\":[\"SLA-000005-E0001\",\"SLA-000005-E0002\",\"SLA-000005-E0003\"],\"outcome\":\"PARTIAL\",\"reasoning\":\"R1: The VERIFIED artifact E0001 is a CSV excerpt containing ACME daily closing price and volume data for all dates in July 2026, matching the requirement to deliver the dataset as a downloadable CSV file. Status = PASS. R2: The VERIFIED artifact E0002 is a JSON quality report whose field_completeness_pct is 100.0 (>=99%) and schema_conformant is true, satisfying the automated quality check requirement. Status = PASS. R3: The VERIFIED artifact E0003 is a git commit dated Sun, 13 Sep 2026 08:34:37 +0100, which is after the service deadline of 2026-09-01T00:00:00Z, therefore the delivery timing requirement is not met. Status = FAIL.\",\"requirements\":[{\"requirement_id\":\"R1\",\"status\":\"PASS\"},{\"requirement_id\":\"R2\",\"status\":\"PASS\"},{\"requirement_id\":\"R3\",\"status\":\"FAIL\"}]}",
+      "reasoning": "R1: The VERIFIED artifact E0001 is a CSV excerpt containing ACME daily closing price and volume data for all dates in July 2026, matching the requirement to deliver the dataset as a downloadable CSV file. Status = PASS. R2: The VERIFIED artifact E0002 is a JSON quality report whose field_completeness_pct is 100.0 (>=99%) and schema_conformant is true, satisfying the automated quality check requirement. Status = PASS. R3: The VERIFIED artifact E0003 is a git commit dated Sun, 13 Sep 2026 08:34:37 +0100, which is after the service deadline of 2026-09-01T00:00:00Z, therefore the delivery timing requirement is not met. Status = FAIL.",
       "requirements": [
         {
           "requirement_id": "R1",
@@ -335,19 +571,20 @@
         }
       ],
       "round_number": 1,
-      "terms_hash": "sha256:ecb42c3a7a3d745d9a0ff9b507bd85557a452f8e75595eb4d00a71d051c31f71",
+      "terms_hash": "sha256:a18392aee24dd328c7fefa13db36ddc2d4baf91b46edb3fbf569e2c3ef8f7892",
       "total_weight": 100,
       "verdict_id": 1
     },
+    "appeal_deadline": 1789400053,
     "settlement": {
-      "agreement_id": "SLA-000001",
+      "agreement_id": "SLA-000005",
       "client_refund": 30000000000000000,
       "earned_weight": 70,
       "escrow_after": 0,
       "escrow_before": 100000000000000000,
       "penalty": 0,
       "provider_payout": 70000000000000000,
-      "settled_tick": 14,
+      "settled_at": 1789400172,
       "status": "SETTLED",
       "total_weight": 100,
       "verdict_id": 1
@@ -357,25 +594,25 @@
       "contract_delta": -100000000000000000
     }
   },
-  "scenario_2": {
-    "agreement_id": "SLA-000002",
+  "scenario_3": {
+    "agreement_id": "SLA-000006",
     "verdict": {
-      "agreement_id": "SLA-000002",
+      "agreement_id": "SLA-000006",
       "deadline_met": true,
       "earned_weight": 0,
-      "evaluated_tick": 22,
-      "evidence_commitment_hash": "sha256:80adda6e797b5a8496481404cabce34d4f03c6ad9705bbcfe304bfac90e02ae6",
+      "evaluated_at": 1789400310,
+      "evidence_commitment_hash": "sha256:9c50eeca97b09714e461eb01d66f3e39466cc8508bbb03e3848901f3ff5d0b70",
       "evidence_examined": [
-        "SLA-000002-E0001",
-        "SLA-000002-E0002",
-        "SLA-000002-E0003"
+        "SLA-000006-E0001",
+        "SLA-000006-E0002",
+        "SLA-000006-E0003"
       ],
       "evidence_verification": [
         {
           "acquisition": "HTTPS_BYTES",
           "byte_length": 674,
           "detail": "retrieved artifact does not match the committed identity",
-          "evidence_id": "SLA-000002-E0001",
+          "evidence_id": "SLA-000006-E0001",
           "evidence_type": "DATASET",
           "expected_identity": "sha256:dc7bc1a3cc35fffff3e36985131d7607caede0f2c5783524fecb48d14ab5e47f",
           "observed_identity": "sha256:6ae1c7fd8340729ea72c69c19d4c39fb59d23864a71c78389bb16bf9c3641c29",
@@ -387,7 +624,7 @@
           "acquisition": "HTTPS_JSON",
           "byte_length": 0,
           "detail": "HTTP 404",
-          "evidence_id": "SLA-000002-E0002",
+          "evidence_id": "SLA-000006-E0002",
           "evidence_type": "API_RESULT",
           "expected_identity": "sha256:0495cf679a936ad249f8e441b905c9e18a94b2dcdf1ef0448875d79b3f291092",
           "observed_identity": "",
@@ -399,7 +636,7 @@
           "acquisition": "UNSUPPORTED",
           "byte_length": 0,
           "detail": "no supported acquisition method for SIGNED_MESSAGE",
-          "evidence_id": "SLA-000002-E0003",
+          "evidence_id": "SLA-000006-E0003",
           "evidence_type": "SIGNED_MESSAGE",
           "expected_identity": "sig:0x5f2a",
           "observed_identity": "",
@@ -410,7 +647,7 @@
       ],
       "outcome": "UNDETERMINED",
       "raw_json": "{}",
-      "reasoning": "No committed evidence could be acquired and verified (SLA-000002-E0001: HASH_MISMATCH, SLA-000002-E0002: SOURCE_UNAVAILABLE, SLA-000002-E0003: UNSUPPORTED). Every requirement is UNDETERMINED; no model was consulted.",
+      "reasoning": "No committed evidence could be acquired and verified (SLA-000006-E0001: HASH_MISMATCH, SLA-000006-E0002: SOURCE_UNAVAILABLE, SLA-000006-E0003: UNSUPPORTED). Every requirement is UNDETERMINED; no model was consulted.",
       "requirements": [
         {
           "requirement_id": "R1",
@@ -426,10 +663,11 @@
         }
       ],
       "round_number": 1,
-      "terms_hash": "sha256:1fee8b29e15f9e16b80f53df3cf4f879c08922a6932c961aac62837051731f9a",
+      "terms_hash": "sha256:e0b3461ac01b3a30bc763a567907f3f50f835cab087fd9c75b281eaebd510b98",
       "total_weight": 100,
       "verdict_id": 1
-    }
+    },
+    "resolution_deadline": 1789407452
   },
-  "finished_at": "2026-09-13T07:57:23Z"
+  "finished_at": "2026-09-14T15:39:39Z"
 }

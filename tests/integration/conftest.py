@@ -172,7 +172,7 @@ class Live:
         self.record["transactions"].append(entry)
         print(f"  {entry['step']:<28} {entry['tx'][:18]}…  {entry['status']} "
               f"{entry['decision']}  {entry['execution']}"
-              + (f"  REFUSED: {entry['refusal'][:90]}" if entry["reverted"] else ""))
+              + (f"  REFUSED: {entry['refusal'][:90]}" if entry.get("refusal") else ""))
         return entry
 
     def attempt(self, acct, fn, *args, step=None):

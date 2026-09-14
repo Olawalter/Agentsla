@@ -99,6 +99,27 @@ party could contest it has actually elapsed. Appealing moves the
 agreement out of `ACCEPTED` entirely, so a stale accepted verdict can
 never trigger settlement.
 
+## Time
+
+Every deadline is real time, and nobody can make it pass sooner.
+
+The contract has no clock of its own. It reads the **GenLayer transaction
+datetime** — the same instant on every validator, chosen by no caller — and
+derives each deadline from the transaction that opens its window:
+
+```
+fund_agreement        → acceptance_deadline = funding tx time    + acceptance window
+accept_agreement      → service_deadline    = acceptance tx time + service window
+                        resolution_deadline = service_deadline   + resolution window
+request_adjudication  → appeal_deadline     = verdict tx time    + appeal window
+```
+
+The windows are terms agreed at creation and frozen at funding. No method
+accepts a time or a deadline, none advances a clock, and none rewrites a
+deadline except the event that owns it. Versions up to 1.1.0 measured
+deadlines in a public, caller-advanceable tick counter; that is gone — see
+[docs/SECURITY.md](docs/SECURITY.md#time-and-deadlines).
+
 ## Evidence
 
 A submitter cannot make a claim into evidence by supplying a description,
@@ -155,12 +176,14 @@ have the same consequence. See [docs/CONSENSUS.md](docs/CONSENSUS.md).
 ```
 earned_weight   = Σ weight[r] for every requirement marked PASS
 provider_gross  = escrow × earned_weight ÷ 100        (integer floor)
-penalty         = provider_gross × penalty_bps ÷ 10000  only if deadline missed
+penalty         = provider_gross × penalty_bps ÷ 10000  only if delivered after the service deadline
 provider_net    = max(0, provider_gross − penalty)
 client_refund   = escrow − provider_net
 ```
 
 Integer arithmetic throughout; no float touches a weight or an amount.
+Lateness is decided in code from two transaction datetimes the contract
+recorded itself — never by the panel.
 Rounding remainders go to the **client**, because `client_refund` is
 computed by subtraction — the party owed a refund is never short by a
 rounding artefact, and the provider cannot gain from one.
@@ -218,12 +241,14 @@ exactly 100.
 pip install -r requirements.txt
 
 genvm-lint check contracts/agentsla_core.py     # lint
-pytest tests/direct/ -v                         # 137 tests, offline
+pytest tests/direct/ -v                         # 155 tests, offline
 SKIP_INTEGRATION=0 pytest tests/integration -v -s   # live StudioNet, no keys needed
+python scripts/verify_deployment.py <address> [rev] # deployed code == repository source?
 ```
 
 The live suite generates throwaway accounts, funds them from the StudioNet
-faucet, deploys the contract and runs both scenarios below. Set
+faucet, deploys the contract and runs the three scenarios below. It waits
+out real deadlines, so it takes about twenty minutes. Set
 `AGENTSLA_CONTRACT=<address>` to run against an existing deployment
 instead.
 
@@ -240,13 +265,16 @@ aid = create_agreement(
         {"requirement_id": "R3", "description": "Delivered on or before 2026-09-01T00:00:00Z",               "weight": 30},
     ]),
     payment_amount_atto        = 10**17,
-    acceptance_deadline_ticks  = 10,
-    service_deadline_ticks     = 30,
-    resolution_deadline_ticks  = 200,
+    acceptance_window_seconds  = 3600,     # windows are DURATIONS agreed now;
+    service_window_seconds     = 3600,     # each deadline is set later by the
+    resolution_window_seconds  = 3600,     # transaction that opens its window
+    appeal_window_seconds      = 600,
 )
 
 fund_agreement(aid)            # client, payable, exact amount — terms LOCK here
+                               # acceptance_deadline = this tx's datetime + 3600
 accept_agreement(aid)          # provider — designated wallet only
+                               # service_deadline = this tx's datetime + 3600
 
 # provider commits a REFERENCE and an IDENTITY for each requirement
 submit_evidence(aid, "R1", "DATASET",       ".../acme-2026-07-daily.csv",        "sha256:6ae1c7fd…")
@@ -256,80 +284,146 @@ submit_deliverable(aid)        # a CLAIM — advances state, proves nothing
 
 request_adjudication(aid)      # every node fetches all three, all VERIFIED
                                # → PARTIAL: R1 PASS, R2 PASS, R3 FAIL (commit dated 2026-09-13)
-                               # → ACCEPTED, appeal window opens
+                               # → ACCEPTED, appeal_deadline = this tx's datetime + 600
 
 settle(aid)                    # REFUSED — ACCEPTED is not FINALIZED
-tick(); tick(); tick(); tick()
+finalize(aid)                  # REFUSED — appeal window open until <deadline>
+# … ten real minutes …
 finalize(aid)                  # → FINALIZED
 settle(aid)                    # provider 70%, client 30%, escrow 0, SETTLED
 ```
 
 ## Proven live on StudioNet
 
-`tests/integration/test_end_to_end.py`, run against a real validator
-panel. The evidence is real: files served from commit
-[`8517e9ab`](https://github.com/Olawalter/Agentsla/commit/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a)
-of this repository (branch `live-evidence`) — a daily price CSV, a quality
-report about it, and the commit that delivered them, dated after the
-agreement's stated deadline. The descriptions the provider committed say
-nothing useful ("Dataset delivered.", "Delivered on time."); the verdict had
-to come from the artifacts.
+`tests/integration/test_end_to_end.py`, run against a real validator panel
+on 14 Sep 2026: **3 passed in 24m52s**. No clock was advanced — there is
+none. Every deadline below was created by the contract from a
+transaction's datetime, and the suite reached the far side of each one by
+waiting for real time to pass.
 
-- Contract: `0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9`, byte-identical to
-  `contracts/agentsla_core.py` in this commit (sha256 of the LF source
-  `881d91680b0c340cf1e6ca403a102d7089ea715e902e9aa048bcbd536963d8e6`)
-- Deploy tx: `0xdcad5c60121fda7876629433b34ffc661446713494d7e4fcdf3044a8a32b903f`
+- Contract: [`0x0a93b5b3C7C9F35c49853F12E7851345b76Ae829`](https://explorer-studio.genlayer.com/address/0x0a93b5b3C7C9F35c49853F12E7851345b76Ae829)
+- Deploy tx: `0x6b3685bf09021099dd99ba66baf630679adc6b17d7817481825227fb85f89d58`
+- Source: `contracts/agentsla_core.py` at commit `685864f` — sha256 of the
+  stored (LF) source `2b0084d6f4a37208f581574ffd61d2f624cfd6f6865d4c40a2041c4079958a49`,
+  99 335 bytes
+- **Repository = deployment = Explorer.** `python scripts/verify_deployment.py
+  0x0a93b5b3C7C9F35c49853F12E7851345b76Ae829 685864f` compares the chain's
+  stored code with git (MATCH), and the explorer's *Contract → Code* tab
+  displays the same 99 335 bytes, hashing to the same digest
 - Runner: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
 - Every transaction, decision and refusal: [docs/live-run.json](docs/live-run.json)
 
-### SLA-000001 — verified evidence, PARTIAL, settled 70/30
+### The contract's time is the transaction's time
 
-| Step | Tx | Result |
-|---|---|---|
-| `create_agreement` → `fund_agreement` (0.1 GEN) → `accept_agreement` | `0x98150006…`, `0x6a210e91…`, `0x12441244…` | MAJORITY_AGREE |
-| `submit_evidence` R1 / R2 / R3 | `0xae8673ec…`, `0x77abf5bb…`, `0x5dbf5248…` | MAJORITY_AGREE |
-| `submit_deliverable` | `0x844583f4…` | MAJORITY_AGREE |
-| **`request_adjudication`** | `0x146c1e8b32298e247f712a993755835c4a254c747bdbea556b46b22686e106cd` | MAJORITY_AGREE, round 1 |
-| `settle` **while ACCEPTED** | `0x6ac7fd02…` | **REFUSED** `illegal transition from ACCEPTED` |
-| `tick` ×4 → `finalize` | `0xfb6b5d6d…` … `0x3c42e91d…` | MAJORITY_AGREE |
-| `settle` | `0xadf3b21e…` | FINALIZED |
+Each lifecycle timestamp the contract stored, against the timestamp the
+network recorded for the transaction that set it:
+
+| Field | Contract | Transaction | Difference |
+|---|---|---|---|
+| SLA-000004 `funded_at` | 1789398926 | `0x7649757e…` 1789398926 | 0 s |
+| SLA-000005 `funded_at` | 1789399368 | `0x8c309ae2…` 1789399368 | 0 s |
+| SLA-000005 `accepted_at` | 1789399382 | `0xb1f1a463…` 1789399382 | 0 s |
+| SLA-000005 `delivered_at` | 1789399440 | `0x87b5b1f6…` 1789399440 | 0 s |
+| SLA-000005 `verdict_at` | 1789399453 | `0xbc0d0ffe…` 1789399453 | 0 s |
+| SLA-000005 `finalized_at` | 1789400157 | `0xd2ec5b93…` 1789400157 | 0 s |
+| SLA-000006 `funded_at` | 1789400240 | `0xcb5bfd80…` 1789400240 | 0 s |
+
+### SLA-000004 — the acceptance window, attacked, then really lapsing
+
+Acceptance window 300 s → `acceptance_deadline` 1789399226.
+
+| Step | Caller | Tx | Transaction time | Result |
+|---|---|---|---|---|
+| `expire_agreement` | client | `0x977a0d6717f76b9df7acc0b121ed2a97e6c3628276c3413dace3c1483d80049c` | 1789398939 | **REFUSED** `acceptance deadline not reached (1789399226, transaction time 1789398939)` |
+| `tick()` | attacker | `0x0bb88e3ebf47346740766aa31cdec923621cf9d4789d1bc1b5af867f57e44d7c` | 1789398957 | **ERROR** — no such method; the runner raises `call to private method … __handle_undefined_method__` |
+| `expire_agreement`, `recover_escrow` | attacker | `0xee3b0a5d…`, `0xe4311f44…` | | **REFUSED** `not a party to this agreement` |
+| ⟨ 286 s of real time ⟩ | | | | |
+| `accept_agreement` | provider | `0xb0ef7854be118f4f8b5f32b818ae115f84510c64fcbd14a297726df17ecaa4b7` | 1789399277 | **REFUSED** `acceptance deadline passed at 1789399226 (transaction time 1789399277)` |
+| `expire_agreement` | client | `0xec94ddd2…` | 1789399291 | EXPIRED |
+| `recover_escrow` | client | `0x3e4740f7…` | 1789399305 | REFUNDED — client balance **+100000000000000000** |
+
+### SLA-000005 — verified evidence, PARTIAL, settled after the real appeal window
+
+The evidence is real: files served from commit
+[`8517e9ab`](https://github.com/Olawalter/Agentsla/commit/8517e9ab0848558b790cee8f8c9a0e533ec7cc3a)
+of this repository (branch `live-evidence`) — a daily price CSV, a quality
+report about it, and the commit that delivered them. The provider's
+descriptions say nothing useful ("Dataset delivered.", "Delivered on
+time."); the verdict had to come from the artifacts. Appeal window 600 s →
+`appeal_deadline` 1789400053.
+
+| Step | Caller | Tx | Transaction time | Result |
+|---|---|---|---|---|
+| `create_agreement` → `fund_agreement` → `accept_agreement` | client, client, provider | `0x7de1e2b3…`, `0x8c309ae2…`, `0xb1f1a463…` | | MAJORITY_AGREE |
+| `submit_evidence` R1 / R2 / R3 → `submit_deliverable` | provider | `0x361a808f…`, `0x8f90e99b…`, `0x882f8b85…`, `0x87b5b1f6…` | | MAJORITY_AGREE |
+| **`request_adjudication`** | client | `0xbc0d0ffe01962d811ee2624d4f7c1a9db1baa3741a2f03714901c96a4e5a2401` | 1789399453 | MAJORITY_AGREE — PARTIAL |
+| `settle` | client | `0x34e8256e…` | 1789399547 | **REFUSED** `illegal transition from ACCEPTED` |
+| `finalize` | client | `0x0ef52adeea2f7509269c284896eec7535fd8da4629fb22a077a6dc7dd275d9d9` | 1789399571 | **REFUSED** `appeal window open until 1789400053 (transaction time 1789399571)` |
+| `finalize` | attacker | `0xb094df94…` | | **REFUSED** `not a party to this agreement` |
+| `tick()` | attacker | `0xe8954c9340768d607a6ddf235dfc8254b9884022cc8306a51f776d33c68b6a66` | | **ERROR** — no such method |
+| ⟨ 564 s of real time ⟩ | | | | |
+| `finalize` | client | `0xd2ec5b9386ff41109a6696caebfb2721fe5779be6f5e465e21c8dc043fd4f1b2` | 1789400157 | FINALIZED |
+| `settle` | client | `0x6cae9e742b00cc6ecae4039d74c31861fe10cda58b5587d62bdd9abfd36f8b66` | 1789400172 | SETTLED |
 
 ```
-evidence_verification   R1 DATASET        VERIFIED  sha256:6ae1c7fd… = sha256:6ae1c7fd…
-                        R2 API_RESULT     VERIFIED  sha256:0495cf67… = sha256:0495cf67…
-                        R3 GITHUB_COMMIT  VERIFIED  git:8517e9ab…    = git:8517e9ab…
-outcome                 PARTIAL      R1 PASS   R2 PASS   R3 FAIL     deadline_met false
+evidence_verification   R1 DATASET        VERIFIED
+                        R2 API_RESULT     VERIFIED
+                        R3 GITHUB_COMMIT  VERIFIED
+outcome                 PARTIAL      R1 PASS   R2 PASS   R3 FAIL
 earned_weight           70/100       ← derived by the CONTRACT
-settlement              provider 70000000000000000   client 30000000000000000   escrow 0
-wallets                 provider balance +70000000000000000, contract −100000000000000000
+delivered_late          false        ← delivered_at 1789399440 ≤ service_deadline
+settlement              provider 70000000000000000   client 30000000000000000   penalty 0   escrow 0
+wallets                 provider +70000000000000000, contract −100000000000000000
 ```
 
-> *"R3: The verified artifact SLA-000001-E0003 shows the delivery commit
-> date was Sun, 13 Sep 2026. This is after the stated deadline of
-> 2026-09-01T00:00:00Z. Status: FAIL."*
+> *"R3: The VERIFIED artifact E0003 is a git commit dated Sun, 13 Sep 2026
+> 08:34:37 +0100, which is after the service deadline of
+> 2026-09-01T00:00:00Z, therefore the delivery timing requirement is not
+> met. Status = FAIL."*
 
-### SLA-000002 — nothing verifiable, UNDETERMINED
+R3's date is a calendar date written into the requirement, read from a
+verified artifact by the panel. The protocol's own deadlines, and the
+penalty (none here — delivery was inside the service window), are decided
+in code from transaction datetimes.
+
+### SLA-000006 — nothing verifiable; escrow recovery not early
 
 Same agreement, evidenced badly: R1 commits the wrong hash for the real
 dataset, R2 points at a file that does not exist, R3 is a signed message.
-Every description says "Requirement completed."
 
-| Step | Tx | Result |
-|---|---|---|
-| **`request_adjudication`** | `0xf4f666d1b0eae05ce71dee173facd734e490eecb85463067b44ac464f405df39` | MAJORITY_AGREE, round 1 |
-| `settle` | `0xd2d3b41a…` | **REFUSED** `illegal transition from UNDETERMINED` |
-| `finalize` | `0x803a0e7e…` | **REFUSED** `illegal transition from UNDETERMINED` |
+| Step | Caller | Tx | Transaction time | Result |
+|---|---|---|---|---|
+| **`request_adjudication`** | client | `0x419d6e8855ec6dc96ef55e3cb82c00cadb3fad2bb290035641841800283696b8` | 1789400310 | MAJORITY_AGREE — UNDETERMINED, no model consulted |
+| `settle`, `finalize` | client | `0x581e7e53…`, `0x3bc5dcb2…` | | **REFUSED** `illegal transition from UNDETERMINED` |
+| `recover_escrow` | client | `0xc2fc12db8a9d7f85b212ac02908b9be090f8d99fb5d295398e45d54bd444a73e` | 1789400356 | **REFUSED** `resolution deadline not reached (1789407452, transaction time 1789400356)` |
+| `recover_escrow` | attacker | `0x572398e2…` | | **REFUSED** `not a party to this agreement` |
 
 ```
-evidence_verification   R1  HASH_MISMATCH       observed sha256 of the real file ≠ committed
-                        R2  SOURCE_UNAVAILABLE  HTTP 404
-                        R3  UNSUPPORTED         no acquisition method for SIGNED_MESSAGE
-outcome                 UNDETERMINED on every requirement
-raw_json                {}        ← no model was consulted
+evidence_verification   R1  HASH_MISMATCH       R2  SOURCE_UNAVAILABLE (HTTP 404)   R3  UNSUPPORTED
+outcome                 UNDETERMINED on every requirement, raw_json {}
 escrow                  100000000000000000, untouched
 ```
 
-### What the first live attempt taught
+### A first run on the same deployment
+
+SLA-000001 to SLA-000003 on this contract come from a first run of the
+suite whose test helper recognised only a contract rollback as a refusal.
+The attacker's `tick()` call failed execution instead (there is no such
+method), the helper misread that, and scenarios 1 and 2 stopped before
+their deadlines. The contract behaved the same way in both runs — its early
+refusals are on chain — and the helper was fixed before the run above.
+
+### The deployments this replaces
+
+- `0x6a03Baf33dC24fBC0a7C1ceC47C511A740CddED9` (commit `cc13c09`) verifies
+  evidence correctly but keeps the public, caller-advanceable `tick()`
+  clock. Its deadlines can be manufactured by any account. It should not
+  be used.
+- `0xBbDC33708DD50E8FA1854F5769B4Df598a43f377` ran the version whose
+  adjudication never retrieved evidence: the panel judged the submitted
+  descriptions, references and hashes as text. It should not be used.
+
+### What the first live evidence run taught (13 Sep)
 
 The first run of this suite, on a disposable deployment
 (`0xb85F75664cdc03Ee42e8CD19961dDb376c4Edf5B`), acquired and verified all
@@ -345,15 +439,6 @@ separates `deadline_met` from requirement status. A validator that
 disagrees now prints its own decision fingerprint to its receipt stdout,
 so a future split can be read from the chain.
 
-### The deployment this replaces
-
-`0xBbDC33708DD50E8FA1854F5769B4Df598a43f377` ran the previous version,
-whose adjudication never retrieved evidence: the panel judged the
-submitted descriptions, references and hashes as text. Its recorded
-verdicts rest on those descriptions (the R3 "late delivery" was stated in
-a description, and the references were placeholder `*.example` URLs). It
-should not be used.
-
 ## Documentation
 
 | | |
@@ -362,17 +447,18 @@ should not be used.
 | [CONSENSUS.md](docs/CONSENSUS.md) | leader and validator code paths, validator independence, the decision fingerprint |
 | [EVIDENCE.md](docs/EVIDENCE.md) | the trust model: supported types, acquisition, canonicalisation, verification, the evidence rule |
 | [SETTLEMENT.md](docs/SETTLEMENT.md) | the formula, rounding, invariants, the three exits |
-| [SECURITY.md](docs/SECURITY.md) | attacks A–I and the evidence-trust attacks, each mapped to its defence and test |
+| [SECURITY.md](docs/SECURITY.md) | attacks A–I, the evidence-trust attacks, and time and deadlines — the lifecycle / fund-safety map and audit table — each mapped to its defence and test |
 | [CONTRACT_API.md](docs/CONTRACT_API.md) | every method: purpose, caller, state, failures |
 | [TESTING.md](docs/TESTING.md) | the five layers and how to run them |
 
 ## Testing
 
 ```
-genvm-lint check              passes — 26 methods (10 view, 16 write)
-pytest tests/direct           137 passed
-pytest tests/integration      2 passed on StudioNet, real panel (6m27s)
-mutation sweep                12/12 evidence-trust defences broken on purpose, all caught
+genvm-lint check              passes — 25 methods (10 view, 15 write)
+pytest tests/direct           155 passed
+pytest tests/integration      3 passed on StudioNet, real panel, real deadlines (24m52s)
+mutation sweeps               12/12 evidence-trust and 12/12 clock / fund-safety defences
+                              broken on purpose, all caught
 ```
 
 Five layers — state, escrow, evidence, adjudication, equivalence — plus
@@ -382,7 +468,13 @@ mocked sources and verified by the contract itself, false descriptions,
 wrong and modified hashes, unavailable and invalid sources, unsupported
 types, cross-agreement evidence, and — by replaying the contract's own
 validator closure with `direct_vm.run_validator()` — validators that fetch
-for themselves and refuse a leader claiming PASS and verified. Every
+for themselves and refuse a leader claiming PASS and verified. And
+`tests/direct/test_clock.py`: the thirteen clock attacks — a public clock,
+a caller-supplied timestamp, premature acceptance, service, resolution and
+appeal expiry from every kind of caller, every fund path at every stage, a
+sweep of every public write against every deadline, and the same datetime
+reproducing the same decision — with transaction time moved only by
+gltest's `direct_vm.warp()`. Every
 adversarial test asserts that **money did not move**, not merely that a
 status changed.
 
@@ -408,10 +500,17 @@ status changed.
 - **Canonical JSON follows Python's `json` module** — for example `100.0`
   stays `100.0`. Submitters in other languages should compute identities
   with `scripts/evidence_identity.py`.
-- **The clock is a tick counter, not a wall clock.** Deadlines are
-  absolute tick values and `tick()` is public, so deadlines advance with
-  protocol activity rather than elapsed time. Calendar deadlines that
-  evidence must be judged against belong in the agreement's text.
+- **Transaction time is the transaction's, not the moment of execution.**
+  A deadline is compared with the datetime GenLayer pins to the
+  transaction, so a call submitted just before a deadline and executed
+  just after is judged as before it. That is what makes the comparison
+  identical on every validator; windows should be long compared with
+  network latency, which is why the appeal window has a 600-second floor.
+- **Calendar dates inside evidence are the panel's to read.** Whether a
+  verified commit is dated after a date written into a requirement is a
+  semantic finding (that is how R3 fails in the live run). The protocol's
+  own deadlines, and the late-delivery penalty, are decided in code from
+  transaction datetimes.
 - **Panel capture is out of scope.** A compromised validator majority
   can agree on a false verdict; that is GenLayer's trust model. The
   appeal path exists so a bad round can be contested and re-run.

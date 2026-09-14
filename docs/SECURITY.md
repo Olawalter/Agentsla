@@ -57,7 +57,7 @@ claim.
 | client | `_require_client` | `fund_agreement`, `update_terms`, `cancel_agreement` |
 | provider | `_require_provider` | `accept_agreement`, `submit_deliverable` |
 | either party | `_require_party` | `submit_evidence`, `supersede_evidence`, `challenge_evidence`, `request_adjudication`, `appeal`, `finalize`, `settle`, `expire_agreement`, `recover_escrow` |
-| anyone | — | `tick`, all views |
+| anyone | — | all views (there is no public write that anyone may call) |
 
 Additionally, only the **original submitter** may supersede their own
 evidence.
@@ -68,7 +68,7 @@ The commitment covers exactly the fields a verdict may depend on:
 
 ```
 agreement_id · client · provider · service_description · requirements
-payment_amount · penalty_bps · all three deadlines · appeal_window
+payment_amount · penalty_bps · the four window durations
 evidence_rules · settlement_rules
 ```
 
@@ -81,25 +81,127 @@ wrong payout.
 `terms_hash` must equal the agreement's. A verdict may only settle the
 terms it actually judged.
 
-## Deadline manipulation
+## Time and deadlines
 
-The **contract** decides whether a deadline has passed, never the caller.
-Deadlines are absolute tick values fixed at creation:
+### What was wrong
+
+Versions up to 1.1.0 kept one global `current_tick`. The public `tick()`
+advanced it for **any** account, and every state-changing call advanced it
+too (each called `_tick()`). The acceptance, service, resolution and appeal
+deadlines were all measured in it, so time could be manufactured two ways
+— calling `tick()` in a loop, or simply generating transactions:
+
+| Manufactured time could… | Consequence |
+|---|---|
+| lapse the acceptance window | the provider can no longer accept an agreement they intended to take |
+| pass the service deadline | `expire_agreement` → `EXPIRED` mid-service, then escrow recovery to the client |
+| close the appeal window | `finalize` before the losing party could `appeal`, then `settle` |
+| pass the resolution deadline | `recover_escrow` from `UNDETERMINED` / `APPEALED` / `EXPIRED` |
+
+The previous version of this document called that "a documented limitation".
+It was a fund-safety defect.
+
+### What replaced it
+
+There is **no clock in storage**. `_now()` returns the GenLayer transaction
+datetime in Unix seconds:
 
 ```python
-acceptance_deadline_tick = now + acceptance_deadline_ticks
+def _now() -> int:
+    return int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 ```
 
-`create_agreement` enforces `0 < acceptance < service < resolution`, so
-the ordering cannot be inverted to create a favourable window. Each gate
-compares the live `current_tick` against the stored deadline.
+GenVM wires the standard library clock to the transaction's datetime (the
+value `gl.message_raw["datetime"]` carries; both are in this runner's
+`genlayer/_internal/msg.py`). Every validator re-executing the transaction
+reads the same instant; it is not a host wall clock, and no argument,
+method or storage field lets a caller set it. `_now()` takes no input,
+writes nothing, and calls no web service or model. Time is only ever read
+in deterministic code — never inside `run_nondet_unsafe`, and never decided
+by the panel.
 
-The clock is a monotonic per-write counter, not a wall clock. `gl.message.datetime`
-is not populated in every runtime this contract must work in, and a
-deadline that silently reads zero is worse than one that is explicitly
-abstract. Consequence: deadlines advance with protocol activity, and
-`tick()` is public so any account can age one forward. This is a
-documented limitation, not a hidden one — see README "Known limitations".
+Windows are **terms**: four durations chosen at creation, each bounded
+(60 s .. 366 days; the appeal window at least 600 s, so an appeal is
+always practically possible), and frozen into `terms_hash` at funding.
+Deadlines are **derived by the contract** from the datetime of the
+lifecycle event that opens each window:
+
+```
+fund_agreement      funded_at     → acceptance_deadline = funded_at    + acceptance_window
+accept_agreement    accepted_at   → service_deadline    = accepted_at  + service_window
+                                    resolution_deadline = service_deadline + resolution_window
+request_adjudication verdict_at   → appeal_deadline     = verdict_at   + appeal_window
+submit_deliverable  delivered_at    (lateness = delivered_at > service_deadline)
+finalize            finalized_at
+```
+
+No caller supplies a deadline, and no method rewrites one except the event
+that owns it: an appeal clears the appeal deadline, and the next verdict
+opens a new window from its own datetime.
+
+### Lifecycle and fund-safety map
+
+| Transition | Caller | Time condition (transaction datetime `now`) | Consensus | Funds |
+|---|---|---|---|---|
+| `accept_agreement` FUNDED→ACTIVE | provider | `now ≤ acceptance_deadline` | — | none |
+| `expire_agreement` FUNDED→EXPIRED | party | `now > acceptance_deadline` | — | none |
+| `expire_agreement` ACTIVE→EXPIRED | party | `now > service_deadline` | — | none |
+| `submit_deliverable` ACTIVE→SUBMITTED | provider | records `delivered_at`; late is allowed and penalised | — | none |
+| `request_adjudication` →ACCEPTED/UNDETERMINED | party | opens `appeal_deadline` (ACCEPTED only) | panel round | none |
+| `appeal` ACCEPTED→APPEALED | party | `now ≤ appeal_deadline` | — | none |
+| `finalize` ACCEPTED→FINALIZED | party | `now > appeal_deadline` | verdict already agreed | none |
+| `settle` FINALIZED→SETTLED | party | none beyond FINALIZED; penalty iff `delivered_at > service_deadline` | — | provider / client |
+| `recover_escrow` EXPIRED (never accepted)→REFUNDED | party | `now > acceptance_deadline` | — | client, full |
+| `recover_escrow` EXPIRED/UNDETERMINED/APPEALED→REFUNDED | party | `now > resolution_deadline` | — | client, full |
+| `cancel_agreement` DRAFT/FUNDED→CANCELLED | client | none — not time-gated, only before acceptance | — | client, full |
+
+### Audit table
+
+From the code above and the tests that exercise it (`tests/direct/test_clock.py`
+unless named).
+
+| Path | Time source | Deadline origin | Caller can manipulate time? | Deadline mutable? | Premature transition tested | Legitimate transition tested |
+|---|---|---|---|---|---|---|
+| Acceptance | transaction datetime | `funded_at` + window | No | No | test 3 (refused at the deadline's last second; state, escrow unchanged) | test 4 (late accept refused, expiry, refund) |
+| Service | transaction datetime | `accepted_at` + window | No | No | test 5 | test 6 |
+| Resolution | transaction datetime | `service_deadline` + window | No | No | tests 6, 7 (recovery refused from EXPIRED and UNDETERMINED) | test 6 (recovery after it) |
+| Appeal | transaction datetime | `verdict_at` + window | No | Only by the next verdict | test 8 (finalize refused; appeal still allowed in that second) | test 9 (appeal refused after; new window from new verdict) |
+| Finality | transaction datetime | `appeal_deadline` | No | No | tests 8, 10, 11, lifecycle | test 9, lifecycle |
+| Escrow recovery | transaction datetime | acceptance / resolution deadline | No | No | tests 6, 7, 11 | tests 4, 6 |
+| Settlement | none (FINALIZED); lateness from recorded datetimes | `service_deadline`, `delivered_at` | No | No | tests 8, 10, 11 (refused while ACCEPTED at every stage) | test 9, lifecycle, `test_penalty_applies_when_delivery_transaction_was_late`, `test_no_penalty_for_on_time_delivery_whatever_the_panel_says` |
+
+Also: **test 1** — `tick`, `advance_time`, `set_time`, `set_deadline`,
+`force_expire`, `force_finalize` do not exist; **test 2** — a far-future
+timestamp passed to every deadline-gated method is refused, and a
+timestamp passed where a window belongs is out of bounds
+(`test_windows_are_bounded_durations`); **test 10** — two parties, an
+attacker and an unrelated account attempt every gated action early, then
+the attacker sends 25 unrelated transactions: no deadline moves; **test
+12** — every public write from all three callers leaves every deadline,
+window and the terms hash unchanged; **test 13** — the contract records
+the transaction's 2031 datetime on a 2026 host, the same datetime
+reproduces the same decision on both sides of the boundary, and a
+validator replaying the adjudication round a day later still agrees (no
+time is read inside consensus).
+
+Tests move time only with gltest's `direct_vm.warp()`, which sets the
+datetime of the next test transaction. It is test infrastructure; the
+contract has no equivalent. Each property was also broken on purpose to
+confirm the suite catches it — a public `tick()` restored, the host clock
+used instead of the transaction's, finalize allowed in the deadline's last
+second, the appeal / acceptance / service / resolution gates removed, the
+penalty decided by the model, the appeal or service window anchored to
+creation, window bounds removed, delivery time not recorded: 12 of 12
+caught.
+
+### The penalty is not a model's decision
+
+The model's `deadline_met` used to gate the late-delivery penalty — a panel
+deciding whether time had elapsed. Lateness is now two datetimes the
+contract recorded itself: `delivered_at > service_deadline`. `deadline_met`
+stays on the verdict as the panel's reading of the evidence (a verified
+commit dated after a calendar date written into the terms, for example) and
+no amount depends on it.
 
 ## Escrow safety
 
@@ -115,9 +217,11 @@ documented limitation, not a hidden one — see README "Known limitations".
 - **Zero before transfer**, on every path.
 - **Bounded rounds.** `MAX_ADJUDICATION_ROUNDS = 5` stops an adversary
   pinning escrow by re-adjudicating forever.
-- **Always an exit.** `recover_escrow` refunds the client from
-  `EXPIRED` / `UNDETERMINED` / `APPEALED` once the resolution deadline
-  passes, so an abandoned counterparty cannot lock funds permanently.
+- **Always an exit, never an early one.** `recover_escrow` refunds the
+  client from `EXPIRED` / `UNDETERMINED` / `APPEALED` once the resolution
+  deadline has really passed (or, for an agreement never accepted, the
+  acceptance deadline), so an abandoned counterparty cannot lock funds
+  permanently — and no one can reach that exit by manufacturing time.
 
 ## Malformed verdict handling
 

@@ -99,7 +99,10 @@ def _bound_to_transaction(live, contract_value, entry, what):
 
 
 def _refused(entry, message):
-    assert entry.get("reverted") or entry.get("rejected_before_execution"), entry
+    """Refused = the contract rolled back, execution failed (for example a
+    method that does not exist), or the call never reached execution."""
+    assert (entry.get("reverted") or entry.get("rejected_before_execution")
+            or entry.get("execution") not in (None, "SUCCESS")), entry
     if message:
         assert message in (entry.get("refusal") or ""), entry.get("refusal")
 

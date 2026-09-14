@@ -150,8 +150,9 @@ requirement's evidence verifiable — including, for a requirement they
 failed, letting the client's verifiable evidence of that failure stand.
 
 `deadline_met` may be `false` only on a VERIFIED artifact showing late
-delivery; with nothing verified it is `true`, since a penalty needs
-positive proof.
+delivery; with nothing verified it is `true`. It is the panel's reading
+of the evidence and moves no money: the late-delivery penalty is decided
+in code from the delivery and acceptance transaction datetimes.
 
 ## What each round records
 

@@ -112,7 +112,7 @@ Canonicalised with sorted keys and no incidental whitespace.
 | `agreement_id` | A verdict for a different agreement is a mis-binding, not a disagreement. |
 | `outcome` | The headline finding. |
 | `requirements` | **This is what pays.** Each PASS carries its committed weight into settlement. The statuses compared are the ones after `_bind_to_verification`, so a model's PASS on unverified evidence never reaches the comparison. |
-| `deadline_met` | Gates the penalty. |
+| `deadline_met` | The panel's reading of the evidence about timing, stored on the verdict. It no longer gates the penalty — lateness is decided in code from transaction datetimes — but a verdict's recorded findings are still ones the panel agreed on. |
 | `evidence_examined` | Two nodes reaching the same verdict over different record sets have not checked the same thing. |
 | `evidence_verification` | Whether each committed record was retrieved **and** matched its identity on this node. Without it, a leader could store "VERIFIED" for a record no validator could verify whenever the requirement's status happened to coincide. |
 
